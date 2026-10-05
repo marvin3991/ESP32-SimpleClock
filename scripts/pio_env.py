@@ -4,29 +4,56 @@ The header lives under the build directory (never in src/), so credentials never
 enter the repository. Values are octal-escaped and are never printed.
 """
 import os
+import re
+import string
 
 Import("env")  # noqa: F821  (provided by PlatformIO/SCons)
 
 
+def parse_value(text):
+    """Value part of a .env line, dotenv style. None if a quote is not closed or
+    anything but a comment follows the closing quote."""
+    text = text.strip()
+    if text[:1] in ('"', "'"):
+        quote, out, i = text[0], [], 1
+        while i < len(text):
+            ch = text[i]
+            if quote == '"' and ch == "\\" and text[i + 1:i + 2] in ('"', "\\"):
+                out.append(text[i + 1])   # \" and \\ are escapes inside double quotes
+                i += 2
+                continue
+            if ch == quote:
+                rest = text[i + 1:].strip()
+                return "".join(out) if not rest or rest.startswith("#") else None
+            out.append(ch)
+            i += 1
+        return None
+    # Unquoted: a "#" after whitespace starts a comment ("pa#ss" stays whole).
+    return re.split(r"\s#", text, maxsplit=1)[0].rstrip()
+
+
 def parse_env_file(path):
-    values = {}
+    """{key: value} and the keys whose value could not be parsed."""
+    values, bad = {}, []
     if not os.path.isfile(path):
-        return values
-    with open(path, encoding="utf-8") as fh:
+        return values, bad
+    # utf-8-sig also reads files that start with a BOM (Windows PowerShell 5.1
+    # writes one with "-Encoding UTF8").
+    with open(path, encoding="utf-8-sig") as fh:
         for raw in fh:
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, val = line.split("=", 1)
             key = key.strip()
-            val = val.strip()
-            if len(val) >= 2 and val[0] == val[-1] == '"':
-                # dotenv style: \" and \\ are escapes inside double quotes
-                val = val[1:-1].replace("\\\\", "\0").replace('\\"', '"').replace("\0", "\\")
-            elif len(val) >= 2 and val[0] == val[-1] == "'":
-                val = val[1:-1]
-            values[key] = val
-    return values
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            parsed = parse_value(val)
+            if parsed is None:
+                bad.append(key)
+            else:
+                values[key] = parsed
+    return values, bad
 
 
 def is_placeholder(text):
@@ -45,17 +72,21 @@ def c_literal(text):
 
 project_dir = env.subst("$PROJECT_DIR")  # noqa: F821
 build_dir = env.subst("$BUILD_DIR")  # noqa: F821
-values = parse_env_file(os.path.join(project_dir, ".env"))
+values, bad = parse_env_file(os.path.join(project_dir, ".env"))
 ssid = values.get("WIFI_SSID", "")
 password = values.get("WIFI_PASSWORD", "")
+pass_len = len(password.encode("utf-8"))
+bad = [key for key in bad if key in ("WIFI_SSID", "WIFI_PASSWORD")]
 problem = None
-if is_placeholder(ssid) or is_placeholder(password):
+if bad:
+    problem = "unclosed quote or text after the closing quote in %s" % ", ".join(bad)
+elif is_placeholder(ssid) or is_placeholder(password):
     problem = "still contains a <placeholder>"
 elif len(ssid.encode("utf-8")) > 32:
     problem = "WIFI_SSID longer than 32 bytes"
-elif password and not 8 <= len(password.encode("utf-8")) <= 64:
-    # WPA2: 8-63 character passphrase or a 64-digit hex PSK; empty = open network
-    problem = "WIFI_PASSWORD must be empty (open network) or 8-64 characters"
+elif password and not (8 <= pass_len <= 63 or (pass_len == 64 and all(c in string.hexdigits for c in password))):
+    # WPA2: 8-63 character passphrase or the key as 64 hex digits; empty = open network
+    problem = "WIFI_PASSWORD must be empty (open network), 8-63 characters or 64 hex digits"
 elif password and not ssid:
     problem = "WIFI_PASSWORD set but WIFI_SSID empty"
 if problem:
