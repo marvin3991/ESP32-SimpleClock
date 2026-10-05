@@ -34,7 +34,10 @@
 // -6..+5 px, one full loop every 144 minutes. The digits are 176 px tall, so a
 // few pixels of travel spread the wear of their edges. tools/gen_fonts.py
 // lays the face out so ink stays clear of the screen edge at every offset.
+// The Wi-Fi setup page moves the same way.
 #define SHIFT_GRID              12
+// Without a valid time ("--") there are no minute changes: step this often.
+#define SHIFT_NO_TIME_STEP_MS   60000UL
 
 // Every hour the side column (weekday, day, seconds) changes sides: odd
 // hours put it left of the digits, which then move right by the column's
@@ -42,6 +45,15 @@
 // hour digits stay put for a whole hour, so moving them every hour keeps
 // their strokes from wearing the same pixels hour after hour.
 #define SWAP_DEFAULT_ENABLED    true
+
+// Side-column text may be wider than the column (e.g. "WED", "SYNC"); its
+// redraw rectangles reach this far past both column edges. tools/gen_fonts.py
+// checks that every label fits inside.
+#define SIDE_COL_SLACK          24
+
+// The setup page drops to the night brightness after this long without a
+// button press or tap (it can stay up for days when there is no Wi-Fi).
+#define SETUP_DIM_AFTER_MS      (10UL * 60UL * 1000UL)
 
 // ---------------------------------------------------------------- colours
 // AMOLED: black pixels are off. Warm white instead of pure white lowers
@@ -63,7 +75,7 @@
 #define BTN_DEBOUNCE_MS         25
 #define BTN_KEY_LONG_MS         1500   // KEY long press -> rotation mode
 #define BTN_BOOT_LONG_MS        3000   // BOOT long press -> Wi-Fi setup
-#define TAP_GUARD_MS            300    // ignore touch bursts shorter than this
+#define TAP_GUARD_MS            300    // taps closer together than this count once
 #define TOAST_MS                1500
 #define STATUS_PAGE_MS          10000
 
