@@ -16,9 +16,7 @@
 
 static const int TOAST_CY = (LAYOUT_HOUR_BASE + LAYOUT_MIN_BASE - FONT_MAIN_CAP) / 2;  // row gap
 static const int IND_BASE = TOAST_CY + FONT_TEXT_CAP / 2;
-// Text in the side column may be wider than the seconds (e.g. "WED", "SYNC"),
-// so its redraw rectangles get this much slack on both sides.
-static const int COL_SLACK = 24;
+static const int COL_SLACK = SIDE_COL_SLACK;
 
 // Brightness pill: one segment per level, sized to sit inside the row gap.
 static const int SEG_W = 20, SEG_H = 10, SEG_GAP = 6, SEG_PAD_X = 12, SEG_PAD_Y = 8;
@@ -218,6 +216,24 @@ static void side_text(Canvas& c, const ClockModel& m, const Font& f, const char*
     c.text(f, s, m.left ? side_edge(m) - x0 : side_edge(m) - x1, base + m.dy, color);
 }
 
+// The same for text in tabular cells (Canvas::text_cells), e.g. the day: the
+// cells keep its size; its position follows the ink, so it moves by a few px
+// when the day changes.
+static void side_cells(Canvas& c, const ClockModel& m, const Font& f, const char* s, int cell, int base,
+                       uint16_t color) {
+    int x0 = 0, x1 = 0;
+    bool any = false;
+    for (int i = 0; s[i]; ++i) {
+        const Glyph* g = font_glyph(f, s[i]);
+        if (!g || !g->w) continue;
+        const int a = i * cell + (cell - (int)g->adv) / 2 + g->x, b = a + g->w;
+        x0 = any ? min(x0, a) : a;
+        x1 = any ? max(x1, b) : b;
+        any = true;
+    }
+    c.text_cells(f, s, m.left ? side_edge(m) - x0 : side_edge(m) - x1, base + m.dy, cell, color);
+}
+
 static void draw_clock(Canvas& c) {
     const ClockModel& m = s_draw_clock;
     const int bx = block_x(m.left) + m.dx;
@@ -230,9 +246,8 @@ static void draw_clock(Canvas& c) {
         c.text_cells(FONT_SEC, m.ss, col_x(m.left) + m.dx, LAYOUT_SEC_BASE + m.dy, LAYOUT_CELL_SEC, C_ACCENT);
     if (c.touches(r_labels(m))) {
         side_text(c, m, FONT_LABEL, m.wd, LAYOUT_LABEL_BASE1, C_ACCENT);
-        // Two tabular cells, together about as wide as "SUN" (LAYOUT_DATE_REF_W, see tools/gen_fonts.py).
-        const int date_x = m.left ? side_edge(m) : side_edge(m) - 2 * LAYOUT_CELL_DATE;
-        c.text_cells(FONT_DATE, m.day, date_x, LAYOUT_DATE_BASE + m.dy, LAYOUT_CELL_DATE, C_DIM);
+        // The widest day is about as wide as "SUN" (LAYOUT_DATE_REF_W, see tools/gen_fonts.py).
+        side_cells(c, m, FONT_DATE, m.day, LAYOUT_CELL_DATE, LAYOUT_DATE_BASE, C_DIM);
         side_text(c, m, FONT_LABEL, m.ampm, LAYOUT_HOUR_BASE, C_DIM);
     }
     if (m.ind[0] && c.touches(r_indicator(m))) side_text(c, m, FONT_TEXT, m.ind, IND_BASE, m.ind_color);
@@ -305,34 +320,45 @@ static void build_qr(const FaceState& s) {
 }
 
 static void draw_setup(Canvas& c) {
+    // Positions for the unshifted page. The whole page takes the pixel shift
+    // like the clock face, because it can stay up for days. The password gets
+    // a row of its own: 12 characters (up to 312 px) do not fit beside the label.
+    static const int TITLE_BASE = 58, QR_TOP = 78, QR_GAP = 8, ROW_SSID = 296, ROW_PASS = 336, ROW_PASS_VALUE = 376,
+                     ROW_IP = 416, ROW_MSG = 456, MARGIN_X = 52;
+    static const int QR_QUIET = 4;   // light border in modules, as ISO/IEC 18004 asks
+    static const int QR_SCALE_MAX = 5;
     const FaceState& s = s_state;
+    const int dx = s.shift_dx, dy = s.shift_dy;
     c.fill(C_BG);
-    c.text_center(FONT_LABEL, "WI-FI SETUP", LCD_WIDTH / 2, 58, C_ACCENT);
+    c.text_center(FONT_LABEL, "WI-FI SETUP", LCD_WIDTH / 2 + dx, TITLE_BASE + dy, C_ACCENT);
     if (s_qr_ok) {
         const int n = qrcodegen_getSize(s_qr);
-        const int quiet = 2, scale = 5;
-        const int size = (n + 2 * quiet) * scale;
-        const int x0 = (LCD_WIDTH - size) / 2, y0 = 78;
+        // Largest whole-pixel module size that ends above the first text row.
+        const int room = ROW_SSID - FONT_TEXT_CAP - QR_GAP - QR_TOP;
+        int scale = QR_SCALE_MAX;
+        while (scale > 1 && (n + 2 * QR_QUIET) * scale > room) --scale;
+        const int size = (n + 2 * QR_QUIET) * scale;
+        const int x0 = (LCD_WIDTH - size) / 2 + dx, y0 = QR_TOP + dy;
         const Rect qr_rect = {(int16_t)x0, (int16_t)y0, (int16_t)size, (int16_t)size};
         if (c.touches(qr_rect)) {
             c.fill_rect(x0, y0, size, size, rgb565(COLOR_QR_LIGHT));
             for (int y = 0; y < n; ++y)
                 for (int x = 0; x < n; ++x)
                     if (qrcodegen_getModule(s_qr, x, y))
-                        c.fill_rect(x0 + (x + quiet) * scale, y0 + (y + quiet) * scale, scale, scale,
+                        c.fill_rect(x0 + (x + QR_QUIET) * scale, y0 + (y + QR_QUIET) * scale, scale, scale,
                                     rgb565(COLOR_QR_DARK));
         }
     }
     // Label left, value right-aligned: rows stay readable whatever the widths.
-    const int lx = 52, rx = LCD_WIDTH - 52;
-    c.text(FONT_TEXT, "WI-FI", lx, 296, C_DIM);
-    c.text_right(FONT_TEXT, s.ap_ssid, rx, 296, C_MAIN);
-    c.text(FONT_TEXT, "PASSWORD", lx, 336, C_DIM);
-    c.text_right(FONT_TEXT, s.ap_pass, rx, 336, C_MAIN);
-    c.text(FONT_TEXT, "THEN OPEN", lx, 376, C_DIM);
-    c.text_right(FONT_TEXT, s.ap_ip, rx, 376, C_MAIN);
+    const int lx = MARGIN_X + dx, rx = LCD_WIDTH - MARGIN_X + dx;
+    c.text(FONT_TEXT, "WI-FI", lx, ROW_SSID + dy, C_DIM);
+    c.text_right(FONT_TEXT, s.ap_ssid, rx, ROW_SSID + dy, C_MAIN);
+    c.text(FONT_TEXT, "PASSWORD", lx, ROW_PASS + dy, C_DIM);
+    c.text_right(FONT_TEXT, s.ap_pass, rx, ROW_PASS_VALUE + dy, C_MAIN);
+    c.text(FONT_TEXT, "THEN OPEN", lx, ROW_IP + dy, C_DIM);
+    c.text_right(FONT_TEXT, s.ap_ip, rx, ROW_IP + dy, C_MAIN);
     if (s.setup_msg[0])
-        c.text_center(FONT_TEXT, s.setup_msg, LCD_WIDTH / 2, 444,
+        c.text_center(FONT_TEXT, s.setup_msg, LCD_WIDTH / 2 + dx, ROW_MSG + dy,
                       s.setup_msg_color ? rgb565(s.setup_msg_color) : C_DIM);
     draw_toast(c, s_draw_toast);
 }
@@ -361,6 +387,8 @@ static uint32_t page_hash(const FaceState& s, const ToastModel& t) {
         h = fnv(h, s.ap_ip, sizeof(s.ap_ip));
         h = fnv(h, s.setup_msg, sizeof(s.setup_msg));
         h = fnv(h, &s.setup_msg_color, sizeof(s.setup_msg_color));
+        h = fnv(h, &s.shift_dx, sizeof(s.shift_dx));
+        h = fnv(h, &s.shift_dy, sizeof(s.shift_dy));
     }
     return h;
 }
