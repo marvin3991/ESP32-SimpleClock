@@ -6,11 +6,13 @@ Usage:
     python tools/gen_fonts.py --preview a.png # also renders a layout preview
     python tools/gen_fonts.py --preview a.png --alt   # side column on the left
 
-Digits use tabular figures so every digit has the same advance width; that is
-what keeps the hour and minute columns aligned. If the font's default digits
-are not tabular, its OpenType `tnum` substitutions are applied.
-Layout numbers are computed here once and emitted as constants, so the preview
-PNG and the firmware share exactly the same geometry.
+Digits are drawn centred in fixed cells (the advance of "0"), which keeps the
+hour and minute columns aligned; the font's OpenType `tnum` substitutions are
+applied when it has them. Layout numbers are computed here once and emitted as
+constants, so the preview PNG and the firmware share exactly the same geometry.
+The generator stops when the layout does not work with the font: ink too close
+to the screen edge, digits or rows overlapping, side text wider than the area
+the firmware redraws for it.
 """
 import argparse
 import datetime
@@ -32,9 +34,10 @@ CAP_MAIN = 176        # hour / minute digits
 CAP_SEC = 44          # seconds
 CAP_LABEL = 25        # weekday (and AM/PM) next to the hours
 CAP_TEXT = 22         # UI text: setup page, status page, toasts
-# The day of month always has two tabular digits ("04", "31"); its size is
-# the one whose two digit cells come closest to this weekday's ink width.
+# The day of month always has two tabular digits ("04", "31") at one size: the
+# one at which the widest day comes closest to this weekday in ink width.
 DATE_WIDTH_REF = "SUN"
+DATE_CAP_MIN, DATE_CAP_MAX = 20, 60   # cap heights tried for the date, px
 
 ROW_GAP = 30          # px between hour baseline and minute cap top
 COL_GAP = 12          # px between minute block and seconds column
@@ -115,7 +118,15 @@ class RasterFont:
             return {"w": 0, "h": 0, "x": 0, "y": 0, "adv": adv, "data": b""}
         img = Image.new("L", (w, h), 0)
         ImageDraw.Draw(img).text((-x0, -y0), ch, font=self.pil, fill=255, anchor="ls")
-        return {"w": w, "h": h, "x": x0, "y": y0, "adv": adv, "data": img.tobytes()}
+        # Pillow's box spans the origin and the advance too, so crop to the
+        # pixels that are actually inked: side text is aligned by its ink, and
+        # blank columns would only take flash.
+        ink = img.getbbox()
+        if ink is None:
+            return {"w": 0, "h": 0, "x": 0, "y": 0, "adv": adv, "data": b""}
+        img = img.crop(ink)
+        return {"w": img.width, "h": img.height, "x": x0 + ink[0], "y": y0 + ink[1], "adv": adv,
+                "data": img.tobytes()}
 
     def text_width(self, text):
         return sum(self.glyphs[c]["adv"] for c in text)
@@ -133,56 +144,101 @@ def ink_box(font, text):
     return x0, y0, x1, y1
 
 
+def cell_offset(cell, adv):
+    """Left offset of a glyph centred in a cell, rounded toward zero like the
+    firmware's C division (text_cells in src/render.cpp)."""
+    return int((cell - adv) / 2)
+
+
+def cells_ink(font, text, cell):
+    """Ink x-range of `text` drawn one character per cell, from the first cell's left."""
+    x0, x1 = 1 << 30, -(1 << 30)
+    for i, ch in enumerate(text):
+        g = font.glyphs[ch]
+        if g["w"]:
+            pen = i * cell + cell_offset(cell, g["adv"])
+            x0, x1 = min(x0, pen + g["x"]), max(x1, pen + g["x"] + g["w"])
+    return x0, x1
+
+
 def pick_date_cap(tab_bytes, units_per_em, cap_units, target_w):
-    """Cap height whose two tabular digit cells add up closest to target_w."""
+    """Cap height at which the widest day ("01".."31", in cells as the firmware
+    draws it) comes closest to target_w in ink width; the larger one on a tie."""
     best = None
-    for cap in range(20, 61):
-        size = round(cap * units_per_em / cap_units)
-        adv = round(ImageFont.truetype(io.BytesIO(tab_bytes), size).getlength("0"))
-        err = abs(2 * adv - target_w)
-        if best is None or err < best[0]:
+    for cap in range(DATE_CAP_MIN, DATE_CAP_MAX + 1):
+        font = RasterFont("DATE", tab_bytes, units_per_em, cap_units, cap, "0123456789")
+        cell = font.glyphs["0"]["adv"]
+        widest = max(x1 - x0 for x0, x1 in (cells_ink(font, "%02d" % day, cell) for day in range(1, 32)))
+        err = abs(widest - target_w)
+        if best is None or err <= best[0]:
             best = (err, cap)
     return best[1]
 
 
-def shift_range():
-    """Pixel-shift offsets used by the firmware, read from src/config.h."""
+def config_int(name):
+    """An integer #define from src/config.h, shared with the firmware."""
     with open(os.path.join(ROOT, "src", "config.h"), encoding="utf-8") as fh:
         for line in fh:
             parts = line.split()
-            if len(parts) >= 3 and parts[0] == "#define" and parts[1] == "SHIFT_GRID":
-                n = int(parts[2])
-                return -(n // 2), n // 2 - 1
-    sys.exit("SHIFT_GRID not found in src/config.h")
+            if len(parts) >= 3 and parts[0] == "#define" and parts[1] == name:
+                return int(parts[2])
+    sys.exit("%s not found in src/config.h" % name)
+
+
+def shift_range():
+    """Pixel-shift offsets used by the firmware (-N/2 .. N/2-1)."""
+    n = config_int("SHIFT_GRID")
+    return -(n // 2), n // 2 - 1
+
+
+def face_boxes(fonts, layout, left):
+    """Ink boxes (x0, y0, x1, y1) of everything the clock face can show at
+    pixel shift (0, 0), by part: "hours", "minutes" (every digit in both
+    cells) and "side" (weekdays, AM/PM, day, seconds, SYNC/BATT), placed as
+    src/face.cpp places them."""
+    by = {f.name: f for f in fonts}
+    bx = layout["ALT_BLOCK_X"] if left else layout["BLOCK_X"]
+    cx = layout["ALT_COL_X"] if left else layout["RIGHT_X"]
+    edge = cx if left else cx + layout["RIGHT_W"]   # outer edge of the side column
+    ind_base = (layout["HOUR_BASE"] + layout["MIN_BASE"] - CAP_MAIN) // 2 + CAP_TEXT // 2   # IND_BASE
+    parts = {"hours": [], "minutes": [], "side": []}
+
+    def add(part, font, text, pen_x, base):
+        x0, y0, x1, y1 = ink_box(font, text)
+        if x1 > x0:
+            parts[part].append((pen_x + x0, base + y0, pen_x + x1, base + y1))
+
+    def cells(part, font, base, cell, x):
+        for d in DIGITS:
+            if d in font.glyphs:
+                for i in range(2):
+                    add(part, font, d, x + i * cell + cell_offset(cell, font.glyphs[d]["adv"]), base)
+
+    cells("hours", by["MAIN"], layout["HOUR_BASE"], layout["CELL"], bx)
+    cells("minutes", by["MAIN"], layout["MIN_BASE"], layout["CELL"], bx)
+    cells("side", by["SEC"], layout["SEC_BASE"], layout["CELL_SEC"], cx)
+    # Every day, in its cells, with its ink on the outer edge (side_cells in face.cpp).
+    date, cell_d = by["DATE"], layout["CELL_DATE"]
+    for day in range(1, 32):
+        text = "%02d" % day
+        x0, x1 = cells_ink(date, text, cell_d)
+        pen = edge - x0 if left else edge - x1
+        for i, d in enumerate(text):
+            add("side", date, d, pen + i * cell_d + cell_offset(cell_d, date.glyphs[d]["adv"]), layout["DATE_BASE"])
+    # Side-column text sits with its ink on the outer edge (side_text in face.cpp).
+    for font, base, texts in ((by["LABEL"], layout["LABEL_BASE1"], WEEKDAYS),
+                              (by["LABEL"], layout["HOUR_BASE"], ("AM", "PM")),
+                              (by["TEXT"], ind_base, ("SYNC", "BATT"))):
+        for text in texts:
+            x0, _, x1, _ = ink_box(font, text)
+            add("side", font, text, edge - x0 if left else edge - x1, base)
+    return parts
 
 
 def edge_margins(fonts, layout):
     """Smallest ink distance to each screen edge over every digit, label,
     side and pixel-shift offset the firmware can draw."""
-    by = {f.name: f for f in fonts}
-    boxes = []
-
-    def add(font, text, pen_x, base):
-        x0, y0, x1, y1 = ink_box(font, text)
-        if x1 > x0:
-            boxes.append((pen_x + x0, base + y0, pen_x + x1, base + y1))
-
-    for left in (False, True):
-        bx = layout["ALT_BLOCK_X"] if left else layout["BLOCK_X"]
-        cx = layout["ALT_COL_X"] if left else layout["RIGHT_X"]
-        edge = cx if left else cx + layout["RIGHT_W"]
-        for d in "0123456789-":
-            for i in range(2):
-                for font, base, cell, x in ((by["MAIN"], layout["HOUR_BASE"], layout["CELL"], bx),
-                                            (by["MAIN"], layout["MIN_BASE"], layout["CELL"], bx),
-                                            (by["SEC"], layout["SEC_BASE"], layout["CELL_SEC"], cx),
-                                            (by["DATE"], layout["DATE_BASE"], layout["CELL_DATE"],
-                                             edge if left else edge - 2 * layout["CELL_DATE"])):
-                    if d in font.glyphs:
-                        add(font, d, x + i * cell + (cell - font.glyphs[d]["adv"]) // 2, base)
-        for text, font in [(w, by["LABEL"]) for w in WEEKDAYS + ("AM", "PM")] + [(w, by["TEXT"]) for w in ("SYNC", "BATT")]:
-            x0, _, x1, _ = ink_box(font, text)
-            add(font, text, edge - x0 if left else edge - x1, layout["LABEL_BASE1"])
+    boxes = [b for left in (False, True) for part in face_boxes(fonts, layout, left).values() for b in part]
     lo, hi = shift_range()
     return {
         "left": min(b[0] for b in boxes) + lo,
@@ -190,6 +246,33 @@ def edge_margins(fonts, layout):
         "top": min(b[1] for b in boxes) + lo,
         "bottom": SCREEN - (max(b[3] for b in boxes) + hi),
     }
+
+
+def layout_problems(fonts, layout):
+    """Reasons the layout does not work with this font (empty list if it does)."""
+    by = {f.name: f for f in fonts}
+    problems = []
+    # Neighbouring digits must not run into each other (non-tabular or very
+    # wide figures are centred in a cell narrower than they are).
+    for name, cell in (("MAIN", layout["CELL"]), ("SEC", layout["CELL_SEC"]), ("DATE", layout["CELL_DATE"])):
+        inks = [cells_ink(by[name], d, cell) for d in DIGITS if d in by[name].glyphs and by[name].glyphs[d]["w"]]
+        if max(x1 for _, x1 in inks) > cell + min(x0 for x0, _ in inks):
+            problems.append("%s digits are wider than their cells and would overlap" % name)
+    slack = config_int("SIDE_COL_SLACK")
+    for left in (False, True):
+        parts = face_boxes(fonts, layout, left)
+        side = "left" if left else "right"
+        if max(b[3] for b in parts["hours"]) > min(b[1] for b in parts["minutes"]):
+            problems.append("hour and minute digits overlap (descending figures?)")
+        digits = parts["hours"] + parts["minutes"]
+        if (max(b[2] for b in digits) > min(b[0] for b in parts["side"]) if not left
+                else min(b[0] for b in digits) < max(b[2] for b in parts["side"])):
+            problems.append("digits overlap the side column (column %s)" % side)
+        cx = layout["ALT_COL_X"] if left else layout["RIGHT_X"]
+        if (min(b[0] for b in parts["side"]) < cx - slack or
+                max(b[2] for b in parts["side"]) > cx + layout["RIGHT_W"] + slack):
+            problems.append("side-column text wider than its redraw area (SIDE_COL_SLACK in src/config.h)")
+    return sorted(set(problems))
 
 
 def compute_layout(main, sec, label, date):
@@ -314,22 +397,21 @@ def preview(path, fonts, layout, alt=False, hh="10", mm="08", ss="42", wd="SUN",
     white, accent, grey = hex_rgb(0xF4EFE6), hex_rgb(0xFF9F0A), hex_rgb(0x8E8E93)
     block_x = layout["ALT_BLOCK_X"] if alt else layout["BLOCK_X"]
     col_x = layout["ALT_COL_X"] if alt else layout["RIGHT_X"]
-    for i, ch in enumerate(hh):
-        draw_text(img, main, ch, block_x + i * layout["CELL"], layout["HOUR_BASE"], white)
-    for i, ch in enumerate(mm):
-        draw_text(img, main, ch, block_x + i * layout["CELL"], layout["MIN_BASE"], white)
-    for i, ch in enumerate(ss):
-        draw_text(img, sec, ch, col_x + i * layout["CELL_SEC"], layout["SEC_BASE"], accent)
-    # Weekday ink and the two date cells both end exactly at the column's outer edge.
+
+    def cells(font, text, x, cell, base, color):
+        for i, ch in enumerate(text):
+            draw_text(img, font, ch, x + i * cell + cell_offset(cell, font.glyphs[ch]["adv"]), base, color)
+
+    cells(main, hh, block_x, layout["CELL"], layout["HOUR_BASE"], white)
+    cells(main, mm, block_x, layout["CELL"], layout["MIN_BASE"], white)
+    cells(sec, ss, col_x, layout["CELL_SEC"], layout["SEC_BASE"], accent)
+    # The weekday's and the day's ink end at the column's outer edge.
     edge = col_x if alt else col_x + layout["RIGHT_W"]
     wx0, _, wx1, _ = ink_box(label, wd)
     draw_text(img, label, wd, edge - wx0 if alt else edge - wx1, layout["LABEL_BASE1"], accent)
-    cell = layout["CELL_DATE"]
-    dx = edge if alt else edge - 2 * cell
-    date = by["DATE"]
-    for i, ch in enumerate("%02d" % int(day)):
-        g = date.glyphs[ch]
-        draw_text(img, date, ch, dx + i * cell + (cell - g["adv"]) // 2, layout["DATE_BASE"], grey)
+    cell, text = layout["CELL_DATE"], "%02d" % int(day)
+    dx0, dx1 = cells_ink(by["DATE"], text, cell)
+    cells(by["DATE"], text, edge - dx0 if alt else edge - dx1, cell, layout["DATE_BASE"], grey)
     img.save(path)
 
 
@@ -361,10 +443,16 @@ def main():
     layout = compute_layout(fonts[0], fonts[1], fonts[2], fonts[4])
     for key, val in layout.items():
         print("%-12s %d" % (key, val))
+    day_inks = [x1 - x0 for x0, x1 in (cells_ink(fonts[4], "%02d" % d, layout["CELL_DATE"]) for d in range(1, 32))]
+    print("date: cap %d px, day ink %d..%d px wide, %s ink %d px" % (cap_date, min(day_inks), max(day_inks),
+                                                                   DATE_WIDTH_REF, ref_x1 - ref_x0))
     margins = edge_margins(fonts, layout)
     print("edge margins at max pixel shift: %s" % margins)
     if min(margins.values()) < MIN_EDGE_MARGIN:
         sys.exit("layout too close to the screen edge (< %d px)" % MIN_EDGE_MARGIN)
+    problems = layout_problems(fonts, layout)
+    if problems:
+        sys.exit("layout does not work with this font:\n  " + "\n  ".join(problems))
     if not args.no_emit:
         size = emit(fonts, layout, os.path.basename(args.ttf))
         print("bitmap bytes: %d" % size)
