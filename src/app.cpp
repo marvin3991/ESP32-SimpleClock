@@ -443,6 +443,12 @@ void app_print_status() {
     Serial.printf("sync     count=%lu last=%ld stale=%d servers=%s %s %s\n", (unsigned long)timekeep_sync_count(),
                   (long)timekeep_last_sync(), timekeep_stale(now), timekeep_server(0), timekeep_server(1),
                   timekeep_server(2));
+    int8_t rtc_steps;
+    uint32_t rtc_checks;
+    float rtc_ppm, rtc_hours;
+    timekeep_rtc_drift(&rtc_steps, &rtc_checks, &rtc_ppm, &rtc_hours);
+    Serial.printf("rtc      ok=%d offset=%d checks=%lu last=%+.1f ppm over %.2f h\n", timekeep_rtc_ok(), rtc_steps,
+                  (unsigned long)rtc_checks, rtc_ppm, rtc_hours);
     Serial.printf("wifi     ssid=\"%s\" connected=%d ip=%s rssi=%d err=%s setup=%d phase=%u drops=%lu\n",
                   g_settings.ssid, net_connected(), net_ip(), net_rssi(), net_last_error(), net_in_setup(),
                   net_setup_phase(), (unsigned long)net_disconnects());

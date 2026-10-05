@@ -7,6 +7,7 @@
 
 // Register map from the NXP PCF85063A datasheet (Rev. 7.3, section 7.1).
 static const uint8_t REG_CONTROL_1 = 0x00;
+static const uint8_t REG_OFFSET = 0x02;    // bit 7 MODE, bits 6..0 two's complement steps
 static const uint8_t REG_RAM = 0x03;       // one free battery-backed byte
 static const uint8_t REG_SECONDS = 0x04;   // bit 7 = OS (oscillator stopped)
 // Written to REG_RAM together with the time. A chip that was never set by
@@ -16,6 +17,7 @@ static const uint8_t RAM_MAGIC = 0xC7;
 static const uint8_t CTRL1_STOP = 0x20;
 static const uint8_t CTRL1_12_24 = 0x02;   // 1 = 12-hour mode
 static const uint8_t SECONDS_OS = 0x80;
+static const uint8_t OFFSET_MODE_FAST = 0x80;   // MODE = 1: correct every 4 minutes
 
 static uint8_t bcd2dec(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
 static uint8_t dec2bcd(uint8_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
@@ -105,4 +107,17 @@ bool rtc_release() {
     if (!read_regs(REG_CONTROL_1, &ctrl, 1)) return false;
     ctrl &= (uint8_t)~CTRL1_STOP;
     return write_regs(REG_CONTROL_1, &ctrl, 1);
+}
+
+bool rtc_set_offset(int8_t steps) {
+    const uint8_t v = (uint8_t)(OFFSET_MODE_FAST | ((uint8_t)steps & 0x7F));
+    return write_regs(REG_OFFSET, &v, 1);
+}
+
+bool rtc_get_offset(int8_t* steps, bool* fast_mode) {
+    uint8_t v;
+    if (!read_regs(REG_OFFSET, &v, 1)) return false;
+    *fast_mode = (v & OFFSET_MODE_FAST) != 0;
+    *steps = (int8_t)((v & 0x40) ? (v | 0x80) : (v & 0x7F));   // sign-extend the 7-bit value
+    return true;
 }

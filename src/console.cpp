@@ -112,6 +112,12 @@ static void run(char* line) {
         strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
         const long offset_ms = (long)(tv.tv_sec - utc) * 1000L + (long)(tv.tv_usec / 1000);
         Serial.printf("RTC %s UTC (epoch %ld), ticked at system %+ld ms\n", buf, (long)utc, offset_ms);
+        static const float PPM_PER_STEP_FAST = 4.069f, PPM_PER_STEP_NORMAL = 4.34f;   // datasheet Table 12
+        int8_t steps;
+        bool fast;
+        if (rtc_get_offset(&steps, &fast))
+            Serial.printf("RTC offset %d steps (%s mode), corrects a crystal %+.1f ppm off\n", steps,
+                          fast ? "fast" : "normal", steps * (fast ? PPM_PER_STEP_FAST : PPM_PER_STEP_NORMAL));
     } else if (!strcmp(cmd, "imu")) {
         float ax, ay, az;
         if (orient_read(&ax, &ay, &az))
