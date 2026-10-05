@@ -28,5 +28,5 @@ extern const Font FONT_DATE;  // size 53 px
 #define LAYOUT_LABEL_BASE1 74
 #define LAYOUT_DATE_BASE 125
 #define LAYOUT_CELL_DATE 35
-#define LAYOUT_DATE_REF_W 70
+#define LAYOUT_DATE_REF_W 67
 #define LAYOUT_TOP 49
