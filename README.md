@@ -14,7 +14,7 @@ The screenshots are read back from a real board with `tools/screenshot.py`; the 
 
 - Hours and minutes in tabular digits, aligned column by column; seconds in small type at the minutes' lower corner.
 - Weekday and day of month at the top of the side column. The day always has two digits and one fixed size, chosen so the widest day is as wide as "SUN"; both sit with their ink on the column's outer edge. AM/PM in 12-hour mode.
-- Time sync over NTP every hour, with up to three servers you can edit (defaults `tock.stdtime.gov.tw`, `time.stdtime.gov.tw`, `pool.ntp.org`). Each sync is also written to the PCF85063 RTC, and the clock starts from the RTC time after a restart, so it keeps working without Wi-Fi.
+- Time sync over NTP every hour, with up to three servers you can edit (defaults `tock.stdtime.gov.tw`, `time.stdtime.gov.tw`, `pool.ntp.org`). The PCF85063 RTC is kept in step with NTP, and the clock starts from the RTC time after a restart, so it keeps working without Wi-Fi. The RTC's drift is measured at every sync and corrected automatically.
 - Eight brightness levels, remembered separately for day and night; automatic night dimming (default 23:00–07:00).
 - Screen-off schedule (default 03:00–09:00): the panel is off in that window; a button press or a tap shows the clock for 30 s.
 - Auto-rotation from the accelerometer, or a fixed orientation.
@@ -105,7 +105,7 @@ Changes are accepted only from the page itself: it sends an `X-Clock` header tha
 .venv/bin/python tools/screenshot.py shot.png
 ```
 
-Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, and where its tick falls against the system clock's second), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one. A screenshot ends with a CRC-32 of its pixels and is retried if the stream was damaged.
+Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, where its tick falls against the system clock's second, and its drift correction), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one. A screenshot ends with a CRC-32 of its pixels and is retried if the stream was damaged.
 
 ## Using another font
 
@@ -129,7 +129,8 @@ The layout (column widths, date size, positions) is recalculated for the new fon
 | Rendering | 480 × 32 px bands, only changed areas redrawn | The ESP32-C6 has no PSRAM for a full 450 KB frame |
 | Time sync | SNTP every 3600 s, up to 3 servers | Host names or IPv4 addresses (letters, digits, `.`, `-`, up to 63 characters); all empty restores the defaults |
 | RTC | PCF85063 kept in UTC, marker byte 0xC7 in its RAM register | Ignored when the marker is missing, the oscillator-stop flag is set, or the time is more than a day before the firmware build date |
-| RTC setting | Written with STOP held; STOP released at x.500 s | The RTC on this board ticks 0.500 s after the release (datasheet: 0.507813–0.507935 s); its tick then falls +1…+3 ms after the system clock's second (`rtc` command) |
+| RTC setting | Written with STOP held; STOP released at x.500 s | The RTC on this board ticks 0.500 s after the release (datasheet: 0.507813–0.507935 s); its tick then falls +1…+3 ms after the system clock's second (`rtc` command). With a drift correction the tick also swings by up to 1/1024 s per Offset step every 4 minutes, as the correction pulses come once a second at the start of every 4th minute (measured at −21: +17 ms before them, −2 ms after). Written again when it is 100 ms off, its correction changed, or the measured drift is implausible (over 260 ppm) |
+| RTC drift | Measured at every NTP sync against the time since the RTC was last set | Offset register in fast mode (4.069 ppm per step, applied every 4 minutes); changed when the drift exceeds half a step plus the uncertainty of the measurement; kept in NVS for an RTC power loss (`factory yes` clears it; it is measured again at the second NTP sync after the restart). This board (firmware log): −85.0 ppm over the first 16 min (7.3 s a day slow) → Offset −21; then +2.4 ppm over 1.04 h (0.2 s a day fast) |
 | Brightness | 8 levels: 3, 8, 16, 30, 55, 95, 160, 255 (register 0x51) | Saved to flash 5 s after the last change |
 | Night dimming | Default 23:00–07:00 | Same start and end disables it; may cross midnight |
 | Screen-off schedule | Default on, 03:00–09:00 | Switches only at the window edges; 30 s on after a press; never during Wi-Fi setup |
