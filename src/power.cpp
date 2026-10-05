@@ -64,11 +64,17 @@ void power_tick() {
     if (!s_ok) return;
     const uint32_t now = millis();
     // The PMU IRQ line is not routed to the MCU, so poll the latched flags.
+    // Only the flags that were read are cleared (write 1 to clear):
+    // clearIrqStatus() writes 0xFF and would drop a key press latched between
+    // the read and the clear.
     if (now - s_last_irq_poll >= POWER_POLL_MS) {
         s_last_irq_poll = now;
-        s_pmu.getIrqStatus();
+        const uint32_t status = (uint32_t)s_pmu.getIrqStatus();   // INTSTS1..3 = bits 23..0
         if (s_pmu.isPekeyShortPressIrq()) s_pwr_flag = true;
-        s_pmu.clearIrqStatus();
+        for (int i = 0; i < XPOWERS_AXP2101_INTSTS_CNT; ++i) {
+            const uint8_t bits = (uint8_t)(status >> (8 * (XPOWERS_AXP2101_INTSTS_CNT - 1 - i)));
+            if (bits) s_pmu.writeRegister(XPOWERS_AXP2101_INTSTS1 + i, bits);
+        }
     }
     if (now - s_last_batt_poll >= BATTERY_POLL_MS) {
         s_last_batt_poll = now;
