@@ -5,7 +5,7 @@
 #include "board.h"
 #include "log.h"
 
-// Register map from the NXP PCF85063A datasheet (section 8.2).
+// Register map from the NXP PCF85063A datasheet (Rev. 7.3, section 7.1).
 static const uint8_t REG_CONTROL_1 = 0x00;
 static const uint8_t REG_RAM = 0x03;       // one free battery-backed byte
 static const uint8_t REG_SECONDS = 0x04;   // bit 7 = OS (oscillator stopped)
@@ -79,10 +79,14 @@ RtcResult rtc_read(time_t* utc) {
     return RTC_OK;
 }
 
-bool rtc_write(time_t utc) {
+bool rtc_write_stopped(time_t utc) {
     struct tm t;
     gmtime_r(&utc, &t);
     if (t.tm_year + 1900 < 2000 || t.tm_year + 1900 > 2099) return false;
+    uint8_t ctrl;
+    if (!read_regs(REG_CONTROL_1, &ctrl, 1)) return false;
+    ctrl = (uint8_t)((ctrl | CTRL1_STOP) & ~CTRL1_12_24);
+    if (!write_regs(REG_CONTROL_1, &ctrl, 1)) return false;
     const uint8_t r[8] = {
         RAM_MAGIC,
         dec2bcd((uint8_t)t.tm_sec),   // OS bit cleared
@@ -94,4 +98,11 @@ bool rtc_write(time_t utc) {
         dec2bcd((uint8_t)(t.tm_year + 1900 - 2000)),
     };
     return write_regs(REG_RAM, r, sizeof(r));
+}
+
+bool rtc_release() {
+    uint8_t ctrl;
+    if (!read_regs(REG_CONTROL_1, &ctrl, 1)) return false;
+    ctrl &= (uint8_t)~CTRL1_STOP;
+    return write_regs(REG_CONTROL_1, &ctrl, 1);
 }

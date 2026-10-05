@@ -15,12 +15,28 @@ static const uint32_t FIRST_SYNC_GRACE_MS = 5UL * 60UL * 1000UL;
 // Boot-time alignment to the RTC's seconds tick.
 static const uint32_t RTC_ALIGN_TIMEOUT_MS = 1100;
 static const uint32_t RTC_ALIGN_POLL_MS = 5;
+// The RTC is set in phase with the system clock, so that after a restart the
+// system clock (aligned to the RTC tick above) is off by milliseconds, not by
+// up to a second. STOP is released this long before the next second. The
+// datasheet (Rev. 7.3, section 7.2.1.2) puts the first tick 0.507813..0.507935 s
+// after the release, but the RTC on this board ticks 0.500 s after it: with
+// the datasheet value the console "rtc" command measured the tick 6 ms early,
+// 1/128 s (7.8 ms) minus the read time.
+static const long RTC_FIRST_TICK_US = 500000L;
+static const long RTC_RELEASE_US = 1000000L - RTC_FIRST_TICK_US;
+// The write starts inside this window before the release and busy-waits the
+// rest; the loop runs every ~10 ms, so it hits the window within seconds.
+static const long RTC_WRITE_WINDOW_US = 30000L;
+// The RTC stores the years 2000..2099.
+static const time_t RTC_END_EPOCH = utc_from_fields(2100, 1, 1, 0, 0, 0);
 
 static volatile bool s_sync_pending = false;   // set from the lwIP task
 static TimeSource s_source = TIME_NONE;
 static time_t s_last_sync = 0;
 static uint32_t s_sync_count = 0;
 static bool s_rtc_ok = false;
+static bool s_rtc_pending = false;   // the system time is to be written to the RTC
+static bool s_grace_over = false;    // FIRST_SYNC_GRACE_MS has passed (latched: millis() wraps)
 static bool s_ntp_started = false;
 static char s_tz[64] = TZ_DEFAULT;
 // lwIP's SNTP keeps pointers to these names (it does not copy them), so they
@@ -65,11 +81,14 @@ void timekeep_init(const char* tz) {
         if (r == RTC_OK) {
             // The RTC only has whole seconds: wait for the next tick so the
             // system clock starts in phase (error ~poll period, not up to 1 s).
+            // A failed read meanwhile keeps the first, unaligned reading.
             const time_t first = utc;
             const uint32_t start = millis();
-            while (r == RTC_OK && utc == first && millis() - start < RTC_ALIGN_TIMEOUT_MS) {
+            while (utc == first && millis() - start < RTC_ALIGN_TIMEOUT_MS) {
                 delay(RTC_ALIGN_POLL_MS);
-                r = rtc_read(&utc);
+                time_t next;
+                if (rtc_read(&next) != RTC_OK) break;
+                utc = next;
             }
         }
         if (r == RTC_OK && utc >= min_valid_epoch()) {
@@ -133,30 +152,45 @@ void timekeep_start_ntp() {
     }
 }
 
+// Writes the system time to the RTC once the current second reaches the
+// window before RTC_RELEASE_US (see there).
+static void rtc_write_in_phase() {
+    if (!s_rtc_pending || !s_rtc_ok) return;
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    if (tv.tv_usec < RTC_RELEASE_US - RTC_WRITE_WINDOW_US || tv.tv_usec >= RTC_RELEASE_US) return;
+    s_rtc_pending = false;
+    const bool written = rtc_write_stopped(tv.tv_sec);
+    while (written && tv.tv_usec < RTC_RELEASE_US) gettimeofday(&tv, nullptr);
+    const bool released = rtc_release();   // also after a failed write: never leave it stopped
+    if (written && released) LOGI("time", "RTC set (utc %ld, in phase)", (long)tv.tv_sec);
+    else LOGE("time", "RTC write failed");
+}
+
 void timekeep_tick() {
+    if (!s_grace_over && millis() > FIRST_SYNC_GRACE_MS) s_grace_over = true;
+    rtc_write_in_phase();
     if (!s_sync_pending) return;
     s_sync_pending = false;
     const time_t now = time(nullptr);
     s_last_sync = now;
     ++s_sync_count;
     s_source = TIME_NTP;
-    bool rtc_written = s_rtc_ok && rtc_write(now);
-    if (s_rtc_ok && !rtc_written) LOGE("time", "RTC write failed");
+    s_rtc_pending = s_rtc_ok;
     struct tm lt;
     localtime_r(&now, &lt);
-    LOGI("time", "NTP sync #%lu: %04d-%02d-%02d %02d:%02d:%02d %s%s", (unsigned long)s_sync_count,
-         lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, s_tz,
-         rtc_written ? ", RTC updated" : "");
+    LOGI("time", "NTP sync #%lu: %04d-%02d-%02d %02d:%02d:%02d %s", (unsigned long)s_sync_count,
+         lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, s_tz);
 }
 
 bool timekeep_valid() { return s_source != TIME_NONE && time(nullptr) >= min_valid_epoch(); }
 
 bool timekeep_set_manual(time_t utc) {
-    if (utc < min_valid_epoch()) return false;
+    if (utc < min_valid_epoch() || utc >= RTC_END_EPOCH) return false;
     struct timeval tv = {utc, 0};
     settimeofday(&tv, nullptr);
     s_source = TIME_MANUAL;
-    if (s_rtc_ok && !rtc_write(utc)) LOGE("time", "RTC write failed");
+    s_rtc_pending = s_rtc_ok;
     return true;
 }
 
@@ -166,7 +200,7 @@ uint32_t timekeep_sync_count() { return s_sync_count; }
 bool timekeep_rtc_ok() { return s_rtc_ok; }
 
 bool timekeep_stale(time_t now) {
-    if (s_last_sync == 0) return millis() > FIRST_SYNC_GRACE_MS;
+    if (s_last_sync == 0) return s_grace_over;
     return now - s_last_sync > SYNC_STALE_S;
 }
 

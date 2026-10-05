@@ -28,7 +28,7 @@ static void help() {
         "  page clock|status|setup\n"
         "  settime <unix-epoch>        set the clock (also writes the RTC)\n"
         "  ntp                         re-run SNTP now\n"
-        "  rtc                         read the RTC\n"
+        "  rtc                         read the RTC; its next tick vs. the system clock\n"
         "  imu                         accelerometer + quadrant\n"
         "  reboot\n"
         "  factory yes                 erase all settings and reboot\n");
@@ -80,24 +80,38 @@ static void run(char* line) {
         else return (void)Serial.println("ERR page clock|status|setup");
         Serial.println("OK");
     } else if (!strcmp(cmd, "settime") && argc >= 2) {
-        const long long t = atoll(argv[1]);
-        Serial.println(timekeep_set_manual((time_t)t) ? "OK" : "ERR epoch before firmware build date");
+        char* end = nullptr;
+        const long long t = strtoll(argv[1], &end, 10);
+        if (end == argv[1] || *end) return (void)Serial.println("ERR settime <unix-epoch>");
+        Serial.println(timekeep_set_manual((time_t)t) ? "OK" : "ERR epoch outside firmware build date .. 2099");
     } else if (!strcmp(cmd, "ntp")) {
         if (!net_connected()) return (void)Serial.println("ERR wifi not connected");
         timekeep_start_ntp();
         Serial.println("OK");
     } else if (!strcmp(cmd, "rtc")) {
-        time_t utc = 0;
-        const RtcResult r = rtc_read(&utc);
-        if (r == RTC_OK) {
-            struct tm t;
-            gmtime_r(&utc, &t);
-            char buf[32];
-            strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
-            Serial.printf("RTC %s UTC (epoch %ld, system %ld)\n", buf, (long)utc, (long)time(nullptr));
-        } else {
-            Serial.println(r == RTC_INVALID ? "RTC invalid (oscillator stopped / unset)" : "RTC I2C error");
+        // Waits for the RTC's next tick and prints where it fell on the system
+        // clock: +0..2 ms means in phase (the rest is the I2C read time).
+        static const uint32_t RTC_TICK_WAIT_MS = 1100;
+        time_t first = 0, utc = 0;
+        RtcResult r = rtc_read(&first);
+        struct timeval tv = {};
+        utc = first;
+        const uint32_t start = millis();
+        while (r == RTC_OK && utc == first && millis() - start < RTC_TICK_WAIT_MS) {
+            r = rtc_read(&utc);
+            gettimeofday(&tv, nullptr);
         }
+        if (r != RTC_OK) {
+            Serial.println(r == RTC_INVALID ? "RTC invalid (oscillator stopped / unset)" : "RTC I2C error");
+            return;
+        }
+        if (utc == first) return (void)Serial.println("ERR RTC did not tick");
+        struct tm t;
+        gmtime_r(&utc, &t);
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
+        const long offset_ms = (long)(tv.tv_sec - utc) * 1000L + (long)(tv.tv_usec / 1000);
+        Serial.printf("RTC %s UTC (epoch %ld), ticked at system %+ld ms\n", buf, (long)utc, offset_ms);
     } else if (!strcmp(cmd, "imu")) {
         float ax, ay, az;
         if (orient_read(&ax, &ay, &az))
