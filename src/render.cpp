@@ -153,6 +153,19 @@ void render_region(const Rect& region, DrawFn draw) {
     }
 }
 
+// CRC-32 as zlib.crc32() computes it (IEEE 802.3, reflected), chainable over
+// pieces. The screenshot carries it because the device cannot tell when the
+// stream was damaged: log output from other tasks can land inside it, and the
+// USB driver drops data silently once the host has stalled.
+static uint32_t crc32_update(uint32_t crc, const uint8_t* p, size_t n) {
+    crc = ~crc;
+    while (n--) {
+        crc ^= *p++;
+        for (int k = 0; k < 8; ++k) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
+
 void render_screenshot(DrawFn draw) {
     // Abort if the host stops reading for this long (unplugged, tool killed).
     const uint32_t STALL_TIMEOUT_MS = 2000;
@@ -166,12 +179,14 @@ void render_screenshot(DrawFn draw) {
     Serial.flush();
     Serial.printf("SHOT %d %d %lu\n", LCD_WIDTH, LCD_HEIGHT, (unsigned long)bytes);
     bool ok = true;
+    uint32_t crc = 0;
     for (int y = 0; ok && y < LCD_HEIGHT; y += BAND_LINES) {
         const int h = min(BAND_LINES, LCD_HEIGHT - y);
         Canvas c(s_band, Rect{0, (int16_t)y, LCD_WIDTH, (int16_t)h});
         draw(c);
         const uint8_t* p = (const uint8_t*)s_band;
         size_t left = (size_t)LCD_WIDTH * h * 2;
+        crc = crc32_update(crc, p, left);
         uint32_t last_progress = millis();
         while (left) {
             size_t n = Serial.write(p, left);
@@ -188,7 +203,8 @@ void render_screenshot(DrawFn draw) {
             last_progress = millis();
         }
     }
-    Serial.print(ok ? "\nSHOT_END\n" : "\nSHOT_ABORT\n");
+    if (ok) Serial.printf("\nSHOT_END %08lx\n", (unsigned long)crc);
+    else Serial.print("\nSHOT_ABORT\n");
     Serial.flush();
     Serial.setTxTimeoutMs(TX_TIMEOUT_DEFAULT_MS);
     g_log_mute = false;

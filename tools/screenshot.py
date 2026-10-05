@@ -4,12 +4,15 @@
     .venv/bin/python tools/screenshot.py out.png [--port /dev/cu.usbmodemXXXX]
 
 The firmware renders the current frame again band by band and streams it
-(the ESP32-C6 has no PSRAM, so there is no frame buffer to read back).
+(the ESP32-C6 has no PSRAM, so there is no frame buffer to read back). The
+stream ends with a CRC-32 of the pixels; a damaged capture is retried.
 """
 import argparse
 import glob
+import re
 import sys
 import time
+import zlib
 
 import serial
 from PIL import Image
@@ -51,8 +54,11 @@ def capture(port):
                 raise CaptureError("timeout: got %d of %d bytes" % (len(data), size))
             data += ser.read(size - len(data))
         tail = ser.read(64).decode("utf-8", "replace")
-        if "SHOT_END" not in tail:
+        end = re.search(r"SHOT_END ([0-9a-f]{8})", tail)
+        if not end:
             raise CaptureError("capture aborted by device (%r)" % tail.strip())
+        if int(end.group(1), 16) != zlib.crc32(data):
+            raise CaptureError("checksum mismatch: the stream was damaged")
     return w, h, bytes(data)
 
 

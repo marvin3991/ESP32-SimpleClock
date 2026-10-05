@@ -44,5 +44,5 @@ typedef void (*DrawFn)(Canvas& c);
 // widened to even coordinates as the panel requires.
 void render_region(const Rect& region, DrawFn draw);
 // Render the whole frame and stream it on Serial (RGB565 little endian):
-//   "SHOT <w> <h> <bytes>\n" <raw bytes> "\nSHOT_END\n"
+//   "SHOT <w> <h> <bytes>\n" <raw bytes> "\nSHOT_END <crc32 of the bytes, 8 hex digits>\n"
 void render_screenshot(DrawFn draw);
