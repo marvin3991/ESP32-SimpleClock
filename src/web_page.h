@@ -111,7 +111,7 @@ small{color:var(--dim);display:block;margin-top:6px}
 const T={
 zh:{title:'時鐘設定',status:'狀態',time_l:'時間',notSynced:'（未校時）',source:'來源',lastSync:'上次對時',wifi_l:'Wi-Fi',notSet:'未設定',offline:'未連線',ip:'IP',power:'電源',charging:'充電中',fw:'韌體',
 wifi:'Wi-Fi（僅支援 2.4 GHz）',ssid:'網路名稱',scanning:'搜尋附近網路中…',scanFound:'找到 {n} 個網路，可從清單選擇。',scanNone:'沒有找到網路，請手動輸入。',scanFail:'無法搜尋網路。',open:'開放',
-password:'密碼',passKept:'已儲存密碼；不變更請留空。',time:'時間',tz:'時區',tz_taipei:'台北（UTC+8）',tz_hk:'香港（UTC+8）',tz_sg:'新加坡（UTC+8）',tz_tokyo:'東京（UTC+9）',tz_seoul:'首爾（UTC+9）',tz_london:'倫敦',tz_paris:'巴黎／柏林',tz_ny:'紐約',tz_la:'洛杉磯',tz_utc:'UTC',tz_custom:'自訂（POSIX TZ）',tzcPh:'例如 CST-8',
+password:'密碼',passKept:'已儲存密碼；不變更請留空。',passNew:'請輸入這個網路的密碼；開放網路請留空。',time:'時間',tz:'時區',tz_taipei:'台北（UTC+8）',tz_hk:'香港（UTC+8）',tz_sg:'新加坡（UTC+8）',tz_tokyo:'東京（UTC+9）',tz_seoul:'首爾（UTC+9）',tz_london:'倫敦',tz_paris:'巴黎／柏林',tz_ny:'紐約',tz_la:'洛杉磯',tz_utc:'UTC',tz_custom:'自訂（POSIX TZ）',tzcPh:'例如 CST-8',
 h12:'12 小時制',showDate:'顯示星期與日期',ntp:'對時伺服器（最多 3 個）',ntpHint:'填主機名稱或 IP，依序使用；三個都留空會恢復預設。',
 bright:'亮度與夜間模式',lday:'白天亮度',lnight:'夜間亮度',night:'夜間自動調暗',start:'開始',end:'結束',
 sleepT:'定時關閉螢幕',sleep:'在下列時段關閉螢幕',offAt:'關閉',onAt:'開啟',sleepHint:'關閉期間按任一鍵或輕觸螢幕，會亮 30 秒。開始與結束相同時視為停用。',
@@ -120,11 +120,11 @@ rotT:'螢幕方向',rot_auto:'自動（重力感應）',rot_0:'USB 朝下',rot_1
 save:'儲存',saving:'儲存中…',saved:'已儲存。',savedWifi:'已儲存，正在連線 Wi-Fi…',connected:'已連上 {ssid}，時鐘會自動對時。',openLater:'之後可用 http://clock.local 或 http://{ip} 開啟本頁。',
 failed:'連線失敗：{reason}，請檢查後重新儲存。',unknown:'無法確認連線結果，請看時鐘螢幕；失敗時長按 BOOT 3 秒重新設定。',lost:'連線中斷，請重新整理頁面。',
 'WRONG PASSWORD':'密碼錯誤','NETWORK NOT FOUND':'找不到這個網路（需 2.4 GHz）','SIGNAL LOST':'訊號中斷','TIMEOUT':'連線逾時','CONNECT FAILED':'無法連線',
-e_ssid:'Wi-Fi 名稱需 1–32 個字元',e_pass:'Wi-Fi 密碼需 8–63 個字元（開放網路請留空）',e_tz:'時區格式不正確',e_night:'夜間時段格式不正確',e_sleep:'關閉螢幕時段格式不正確',e_level:'亮度超出範圍',e_rot:'螢幕方向不正確',e_ntp:'對時伺服器格式不正確（只能有英數字、點、連字號，最長 63 字元）',e_nvs:'儲存失敗（快閃記憶體寫入錯誤）',
+e_ssid:'Wi-Fi 名稱需 1–32 個字元',e_pass:'Wi-Fi 密碼需 8–63 個字元，或 64 位十六進位金鑰（開放網路請留空）',e_host:'請用 http://clock.local 或時鐘的 IP 開啟本頁。',e_tz:'時區格式不正確',e_night:'夜間時段格式不正確',e_sleep:'關閉螢幕時段格式不正確',e_level:'亮度超出範圍',e_rot:'螢幕方向不正確',e_ntp:'對時伺服器格式不正確（只能有英數字、點、連字號，最長 63 字元）',e_nvs:'儲存失敗（快閃記憶體寫入錯誤）',
 keys:'按鍵',k_key:'亮度 ＋（長按：切換螢幕方向）',k_boot:'亮度 －（長按 3 秒：Wi-Fi 設定）',k_pwr:'螢幕開／關（長按 6 秒：關機）',k_tapL:'輕觸螢幕',k_tap:'顯示／關閉狀態頁',k_offL:'定時關閉中',k_off:'按任一鍵或輕觸：亮 30 秒',langBtn:'English'},
 en:{title:'Clock settings',status:'Status',time_l:'Time',notSynced:' (not synced)',source:'Source',lastSync:'last sync',wifi_l:'Wi-Fi',notSet:'not set',offline:'offline',ip:'IP',power:'Power',charging:'charging',fw:'Firmware',
 wifi:'Wi-Fi (2.4 GHz only)',ssid:'Network name',scanning:'Scanning for networks…',scanFound:'Found {n} networks; pick one from the list.',scanNone:'No networks found; type the name.',scanFail:'Network scan failed.',open:'open',
-password:'Password',passKept:'A password is saved; leave empty to keep it.',time:'Time',tz:'Time zone',tz_taipei:'Taipei (UTC+8)',tz_hk:'Hong Kong (UTC+8)',tz_sg:'Singapore (UTC+8)',tz_tokyo:'Tokyo (UTC+9)',tz_seoul:'Seoul (UTC+9)',tz_london:'London',tz_paris:'Paris / Berlin',tz_ny:'New York',tz_la:'Los Angeles',tz_utc:'UTC',tz_custom:'Custom (POSIX TZ)',tzcPh:'e.g. CST-8',
+password:'Password',passKept:'A password is saved; leave empty to keep it.',passNew:'Enter the password of this network; leave empty for an open network.',time:'Time',tz:'Time zone',tz_taipei:'Taipei (UTC+8)',tz_hk:'Hong Kong (UTC+8)',tz_sg:'Singapore (UTC+8)',tz_tokyo:'Tokyo (UTC+9)',tz_seoul:'Seoul (UTC+9)',tz_london:'London',tz_paris:'Paris / Berlin',tz_ny:'New York',tz_la:'Los Angeles',tz_utc:'UTC',tz_custom:'Custom (POSIX TZ)',tzcPh:'e.g. CST-8',
 h12:'12-hour clock',showDate:'Show weekday and date',ntp:'Time servers (up to 3)',ntpHint:'Host names or IPs, used in order; leave all three empty to restore the defaults.',
 bright:'Brightness and night mode',lday:'Day brightness',lnight:'Night brightness',night:'Dim at night',start:'Start',end:'End',
 sleepT:'Screen-off schedule',sleep:'Turn the screen off between',offAt:'Off at',onAt:'On at',sleepHint:'Meanwhile a button press or tap shows the clock for 30 s. Same start and end disables it.',
@@ -133,9 +133,12 @@ rotT:'Screen orientation',rot_auto:'Automatic (accelerometer)',rot_0:'USB port d
 save:'Save',saving:'Saving…',saved:'Saved.',savedWifi:'Saved; connecting to Wi-Fi…',connected:'Connected to {ssid}; the clock will set its time.',openLater:'Later, open this page at http://clock.local or http://{ip}.',
 failed:'Connection failed: {reason}. Check and save again.',unknown:'Could not confirm the result; check the clock. If it failed, hold BOOT for 3 s to set up again.',lost:'Connection lost; reload the page.',
 'WRONG PASSWORD':'wrong password','NETWORK NOT FOUND':'network not found (2.4 GHz needed)','SIGNAL LOST':'signal lost','TIMEOUT':'timed out','CONNECT FAILED':'could not connect',
-e_ssid:'The Wi-Fi name must be 1–32 characters.',e_pass:'The Wi-Fi password must be 8–63 characters (empty for open networks).',e_tz:'Invalid time zone.',e_night:'Invalid night hours.',e_sleep:'Invalid screen-off hours.',e_level:'Brightness out of range.',e_rot:'Invalid orientation.',e_ntp:'Invalid time server (letters, digits, dots and hyphens; up to 63 characters).',e_nvs:'Saving failed (flash write error).',
+e_ssid:'The Wi-Fi name must be 1–32 characters.',e_pass:'The Wi-Fi password must be 8–63 characters or a 64-digit hex key (empty for open networks).',e_host:'Open this page at http://clock.local or at the IP address of the clock.',e_tz:'Invalid time zone.',e_night:'Invalid night hours.',e_sleep:'Invalid screen-off hours.',e_level:'Brightness out of range.',e_rot:'Invalid orientation.',e_ntp:'Invalid time server (letters, digits, dots and hyphens; up to 63 characters).',e_nvs:'Saving failed (flash write error).',
 keys:'Buttons',k_key:'Brightness + (hold: change orientation)',k_boot:'Brightness − (hold 3 s: Wi-Fi setup)',k_pwr:'Screen on/off (hold 6 s: power off)',k_tapL:'Tap the screen',k_tap:'Show or hide the status page',k_offL:'During screen-off hours',k_off:'Any button or tap: on for 30 s',langBtn:'中文'}};
 const $=id=>document.getElementById(id);
+// Sent with every API request: the clock refuses changes without it (another
+// web site cannot add it), see API_HEADER in net.cpp.
+const H={'X-Clock':'1'};
 let lang='en',cur=null,last=null,polling=false,scanState=null;
 try{lang=localStorage.getItem('lang')||''}catch(e){lang=''}
 if(lang!=='zh'&&lang!=='en')lang=(navigator.language||'').toLowerCase().startsWith('zh')?'zh':'en';
@@ -150,12 +153,16 @@ $('lang').textContent=t('langBtn');$('tzc').placeholder=t('tzcPh');
 ['ntp1','ntp2','ntp3'].forEach((id,i)=>{$(id).placeholder=['tock.stdtime.gov.tw','time.stdtime.gov.tw','pool.ntp.org'][i]});
 $('keys').innerHTML=[['KEY',t('k_key')],['BOOT',t('k_boot')],['PWR',t('k_pwr')],[t('k_tapL'),t('k_tap')],[t('k_offL'),t('k_off')]].map(r=>'<span>'+esc(r[0])+'</span><span>'+esc(r[1])+'</span>').join('');
 if(last)status(last);
-if(cur)$('passhint').textContent=cur.has_pass?t('passKept'):'';
+passHint();
 showScan();
 }
+// The saved password is kept only while the network name stays the same.
+function passHint(){$('passhint').textContent=!cur?'':$('ssid').value!==cur.ssid?t('passNew'):cur.has_pass?t('passKept'):''}
+function showErr(code){$('msg').className='err';$('msg').textContent=t('e_'+code)}
 $('lang').onclick=()=>{lang=lang==='zh'?'en':'zh';try{localStorage.setItem('lang',lang)}catch(e){}applyLang()};
 for(const id of['lday','lnight'])for(let i=1;i<=8;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' / 8';$(id).appendChild(o)}
 $('tz').onchange=()=>{$('tzc').style.display=$('tz').value==='custom'?'block':'none'};
+$('ssid').oninput=passHint;
 function status(s){
 last=s;
 const w=s.wifi.connected?s.wifi.ssid+' ('+s.wifi.rssi+' dBm)':(s.wifi.ssid?t('offline')+(s.wifi.err?' · '+t(s.wifi.err):''):t('notSet'));
@@ -165,7 +172,7 @@ $('st').innerHTML=rows.map(r=>'<span>'+esc(r[0])+'</span><span>'+esc(r[1])+'</sp
 }
 function fill(s){
 const c=s.cfg;cur=c;
-$('ssid').value=c.ssid;$('passhint').textContent=c.has_pass?t('passKept'):'';
+$('ssid').value=c.ssid;passHint();
 const opt=[...$('tz').options].find(o=>o.value===c.tz);
 if(opt){$('tz').value=c.tz;$('tzc').style.display='none'}else{$('tz').value='custom';$('tzc').value=c.tz;$('tzc').style.display='block'}
 $('h12').checked=c.h12;$('date').checked=c.date;$('night').checked=c.night;
@@ -174,7 +181,10 @@ $('lday').value=c.lday+1;$('lnight').value=c.lnight+1;$('rot').value=c.rot;
 $('sleep').checked=c.sleep;$('ss').value=hm(c.ss);$('se').value=hm(c.se);$('swap').checked=c.swap;
 ['ntp1','ntp2','ntp3'].forEach((id,i)=>{$(id).value=c.ntp[i]||''});
 }
-async function load(){const r=await fetch('/api/state');const s=await r.json();status(s);if(!cur)fill(s);return s}
+async function load(){
+const r=await fetch('/api/state',{headers:H});const s=await r.json();
+if(!r.ok){showErr(s.error);throw new Error(s.error)}
+status(s);if(!cur)fill(s);return s}
 function showScan(){
 const e=$('scan');
 if(!scanState){e.textContent=t('scanning');return}
@@ -182,24 +192,26 @@ if(scanState.fail){e.textContent=t('scanFail');return}
 e.textContent=scanState.n?t('scanFound',{n:scanState.n}):t('scanNone');
 }
 async function scan(){
-try{const r=await fetch('/api/scan');const j=await r.json();
+try{const r=await fetch('/api/scan',{headers:H});const j=await r.json();
 if(j.scanning){setTimeout(scan,1500);return}
 $('nets').innerHTML=j.nets.map(n=>'<option value="'+esc(n.ssid)+'">'+esc(n.rssi+' dBm'+(n.open?' · '+t('open'):''))+'</option>').join('');
 scanState={n:j.nets.length};
 }catch(e){scanState={fail:true}}
 showScan();
 }
-async function watch(){
+// Follows a Wi-Fi change until it connects or fails: by the setup phase in
+// setup mode, by the Wi-Fi state when the page was opened at clock.local.
+async function watch(ssid){
 if(polling)return;polling=true;
-for(let i=0;i<40;i++){
+let done=false;
+for(let i=0;i<40&&!done;i++){
 await new Promise(r=>setTimeout(r,1500));
 let s;try{s=await load()}catch(e){continue}
-const p=s.setup.phase;
-if(p==='ok'){$('msg').className='ok';$('msg').textContent=t('connected',{ssid:s.wifi.ssid})+(s.wifi.ip?' '+t('openLater',{ip:s.wifi.ip}):'');break}
-if(p==='fail'){$('msg').className='err';$('msg').textContent=t('failed',{reason:t(s.setup.reason||'CONNECT FAILED')});break}
-if(p==='off')break;
-if(i===39)$('msg').textContent=t('unknown');
+const p=s.setup.phase,w=s.wifi;
+if(p==='ok'||(p==='off'&&w.connected&&w.ssid===ssid)){$('msg').className='ok';$('msg').textContent=t('connected',{ssid:w.ssid})+(w.ip?' '+t('openLater',{ip:w.ip}):'');done=true}
+else if(p==='fail'||(p==='off'&&!w.connected&&!w.busy&&w.err)){$('msg').className='err';$('msg').textContent=t('failed',{reason:t((p==='fail'?s.setup.reason:w.err)||'CONNECT FAILED')});done=true}
 }
+if(!done){$('msg').className='';$('msg').textContent=t('unknown')}
 polling=false;
 }
 $('f').onsubmit=async e=>{
@@ -212,10 +224,10 @@ sleep:$('sleep').checked?1:0,ss:$('ss').value,se:$('se').value,swap:$('swap').ch
 ntp1:$('ntp1').value.trim(),ntp2:$('ntp2').value.trim(),ntp3:$('ntp3').value.trim()});
 $('save').disabled=true;$('msg').className='';$('msg').textContent=t('saving');
 try{
-const r=await fetch('/api/settings',{method:'POST',body:b});const j=await r.json();
-if(!j.ok){$('msg').className='err';$('msg').textContent=t('e_'+j.error);return}
+const r=await fetch('/api/settings',{method:'POST',body:b,headers:H});const j=await r.json();
+if(!j.ok){showErr(j.error);return}
 $('pass').value='';cur=null;
-if(j.wifi_changed){$('msg').textContent=t('savedWifi');watch()}
+if(j.wifi_changed){$('msg').textContent=t('savedWifi');watch(b.get('ssid'))}
 else{$('msg').className='ok';$('msg').textContent=t('saved');load()}
 }catch(err){$('msg').className='err';$('msg').textContent=t('lost')}
 finally{$('save').disabled=false}

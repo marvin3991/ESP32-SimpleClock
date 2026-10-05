@@ -18,11 +18,27 @@
 // a failed attempt.
 static const uint32_t ATTEMPT_TIMEOUT_MS = 30000;
 // Leave setup mode by itself after this long without any web request, but
-// only if working credentials already exist (otherwise there is nothing to
-// go back to).
+// only if credentials exist and nothing was tried in this session (after a
+// failed try the hotspot stays, so the mistake can be fixed).
 static const uint32_t SETUP_IDLE_EXIT_MS = 10UL * 60UL * 1000UL;
 static const uint32_t SCAN_MAX_AGE_MS = 20000;
 static const uint32_t POWER_CHECK_MS = 5000;
+
+// Setup hotspot password: 12 characters from these 31 (no 0/o or 1/l/i, which
+// are easy to mix up when typed): 31^12, about 7.9e17 keys. Eight digits
+// (10^8) would fall to an offline search of a recorded WPA2 handshake within
+// a minute (hashcat mode 22000 does ~2.66e6 keys/s on one RTX 4090), and the
+// home Wi-Fi password is sent through this hotspot.
+static const char AP_PASS_CHARS[] = "abcdefghjkmnpqrstuvwxyz23456789";
+static const int AP_PASS_LEN = 12;
+
+// The settings page sends this header with every API request. A page from
+// another web site cannot add it without a CORS preflight, which is never
+// answered, so it cannot change the settings (cross-site request forgery).
+static const char* const API_HEADER = "X-Clock";
+static const char* COLLECTED_HEADERS[] = {"Host", API_HEADER};
+// Host names that can only be the clock itself (see local_host()).
+static const char* const LOCAL_SUFFIXES[] = {".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain"};
 
 enum Mode : uint8_t { MODE_STA, MODE_SETUP };
 
@@ -43,7 +59,7 @@ static volatile uint8_t s_ev_reason = 0;
 
 static SetupPhase s_phase = SETUP_OFF;
 static uint32_t s_phase_at = 0, s_last_web = 0;
-static char s_ap_ssid[24] = "", s_ap_pass[12] = "", s_ap_ip[16] = "192.168.4.1";
+static char s_ap_ssid[24] = "", s_ap_pass[AP_PASS_LEN + 1] = "", s_ap_ip[16] = "192.168.4.1";
 static bool s_reconnect_pending = false;
 static uint32_t s_scan_at = 0;
 static int8_t s_sleep_mode = -1;   // last WiFi.setSleep() value, -1 = not set yet
@@ -92,12 +108,32 @@ static void json_str(String& out, const char* s) {
     out += '"';
 }
 
-static void begin_attempt() {
-    if (!settings_has_wifi()) return;
-    WiFi.begin(g_settings.ssid, g_settings.pass);
+// A connection attempt failed (or a connection dropped): setup mode reports
+// it, otherwise the next attempt follows after a growing delay.
+static void attempt_failed(uint32_t now, const char* err) {
+    s_attempting = false;
+    snprintf(s_err, sizeof(s_err), "%s", err);
+    if (s_mode == MODE_SETUP && s_phase == SETUP_CONNECTING) {
+        s_phase = SETUP_FAIL;
+        s_phase_at = now;
+    } else {
+        s_retry_at = now + s_backoff;
+        s_backoff = min(s_backoff * 2, WIFI_RETRY_MAX_MS);
+    }
+}
+
+// Without an SSID, or when the Wi-Fi driver rejects the request outright, the
+// attempt fails at once instead of after ATTEMPT_TIMEOUT_MS (so setup mode
+// cannot stay in CONNECTING).
+static void begin_attempt(uint32_t now) {
+    if (!settings_has_wifi()) return attempt_failed(now, "CONNECT FAILED");
     s_attempting = true;
-    s_attempt_at = millis();
+    s_attempt_at = now;
     LOGI("net", "connecting to \"%s\"", g_settings.ssid);
+    if (WiFi.begin(g_settings.ssid, g_settings.pass) == WL_CONNECT_FAILED) {
+        LOGI("net", "connect request rejected by the Wi-Fi driver");
+        attempt_failed(now, "CONNECT FAILED");
+    }
 }
 
 static void on_wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -117,6 +153,35 @@ static void send_json(int code, const String& body) {
     s_web.send(code, "application/json", body);
 }
 
+// True for a Host header that can only reach the clock itself: an IP
+// literal, a name without dots, or a name under a suffix that public DNS does
+// not serve. A public domain is refused: an attacker's own name resolving to
+// the clock (DNS rebinding) would otherwise count as the page's own origin.
+static bool local_host(String host) {
+    host.trim();
+    host.toLowerCase();
+    if (host.startsWith("[")) return true;   // IPv6 literal
+    const int colon = host.lastIndexOf(':');
+    if (colon >= 0) host.remove(colon);      // port
+    if (host.endsWith(".")) host.remove(host.length() - 1);
+    if (host.length() == 0) return false;
+    bool ip = true;
+    for (size_t i = 0; i < host.length(); ++i)
+        if (!isdigit((unsigned char)host[i]) && host[i] != '.') ip = false;
+    if (ip || host.indexOf('.') < 0) return true;
+    for (const char* suffix : LOCAL_SUFFIXES)
+        if (host.endsWith(suffix)) return true;
+    return false;
+}
+
+// API requests must come from the settings page itself; changes also need
+// API_HEADER (see there). Sends 403 otherwise.
+static bool api_allowed(bool change) {
+    if (local_host(s_web.header("Host")) && (!change || s_web.header(API_HEADER) == "1")) return true;
+    send_json(403, "{\"ok\":false,\"error\":\"host\"}");
+    return false;
+}
+
 static void handle_root() {
     s_last_web = millis();
     s_web.sendHeader("Cache-Control", "no-store");
@@ -134,6 +199,7 @@ static const char* phase_name(SetupPhase p) {
 }
 
 static void handle_state() {
+    if (!api_allowed(false)) return;
     s_last_web = millis();
     const time_t now = time(nullptr);
     struct tm lt;
@@ -168,6 +234,8 @@ static void handle_state() {
     j += ",\"rssi\":" + String(s_connected ? WiFi.RSSI() : 0);
     j += ",\"err\":";
     json_str(j, s_err);
+    j += ",\"busy\":";   // an attempt runs or is about to start: "err" may be from an older one
+    j += s_attempting || s_reconnect_pending ? "true" : "false";
     j += "},\"setup\":{\"phase\":";
     json_str(j, phase_name(s_phase));
     j += ",\"reason\":";   // ASCII code; the page translates it
@@ -211,6 +279,7 @@ static void handle_state() {
 }
 
 static void handle_scan() {
+    if (!api_allowed(false)) return;
     s_last_web = millis();
     const int16_t n = WiFi.scanComplete();
     if (n == WIFI_SCAN_RUNNING) {
@@ -256,8 +325,34 @@ static bool parse_hhmm(const String& s, uint16_t* out) {
     return true;
 }
 
+// A "%00" (or a malformed "%zz") in the request decodes to a NUL that counts
+// in String::length() but ends the C string, which would slip past the
+// length checks below.
+static bool has_nul(const String& s) { return strlen(s.c_str()) != s.length(); }
+
+// Decimal number in [lo, hi]; toInt() would turn "" or "x" into 0.
+static bool parse_num(const String& s, long lo, long hi, long* out) {
+    if (s.length() == 0 || s.length() > 3) return false;
+    for (size_t i = 0; i < s.length(); ++i)
+        if (!isdigit((unsigned char)s[i])) return false;
+    *out = s.toInt();
+    return *out >= lo && *out <= hi;
+}
+
+// WPA2: a passphrase of 8..63 characters, or the 256-bit key as 64 hex
+// digits; empty = open network (or keep the stored password).
+static bool valid_pass(const String& pass) {
+    if (has_nul(pass)) return false;
+    if (pass.length() == 64) {
+        for (size_t i = 0; i < pass.length(); ++i)
+            if (!isxdigit((unsigned char)pass[i])) return false;
+        return true;
+    }
+    return pass.length() == 0 || (pass.length() >= 8 && pass.length() <= 63);
+}
+
 static bool valid_tz(const String& tz) {
-    if (tz.length() == 0 || tz.length() >= sizeof(g_settings.tz)) return false;
+    if (tz.length() == 0 || tz.length() >= sizeof(g_settings.tz) || has_nul(tz)) return false;
     for (size_t i = 0; i < tz.length(); ++i) {
         const char c = tz[i];
         if (!isalnum((unsigned char)c) && !strchr("<>+-,./:", c)) return false;
@@ -284,24 +379,24 @@ static void fail(const char* code) {
 }
 
 static void handle_save() {
+    if (!api_allowed(true)) return;
     s_last_web = millis();
     const String ssid = s_web.arg("ssid");
     const String pass = s_web.arg("pass");
     const String tz = s_web.arg("tz");
     uint16_t ns, ne, ss, se;
-    if (ssid.length() == 0 || ssid.length() > 32) return fail("ssid");
-    if (pass.length() > 0 && (pass.length() < 8 || pass.length() > 64))
-        return fail("pass");
+    long lday, lnight, rot;
+    if (ssid.length() == 0 || ssid.length() > 32 || has_nul(ssid)) return fail("ssid");
+    if (!valid_pass(pass)) return fail("pass");
     if (!valid_tz(tz)) return fail("tz");
     if (!parse_hhmm(s_web.arg("ns"), &ns) || !parse_hhmm(s_web.arg("ne"), &ne))
         return fail("night");
     if (!parse_hhmm(s_web.arg("ss"), &ss) || !parse_hhmm(s_web.arg("se"), &se))
         return fail("sleep");
-    const long lday = s_web.arg("lday").toInt(), lnight = s_web.arg("lnight").toInt();
-    const long rot = s_web.arg("rot").toInt();
-    if (lday < 0 || lday >= BRIGHTNESS_LEVELS || lnight < 0 || lnight >= BRIGHTNESS_LEVELS)
+    if (!parse_num(s_web.arg("lday"), 0, BRIGHTNESS_LEVELS - 1, &lday) ||
+        !parse_num(s_web.arg("lnight"), 0, BRIGHTNESS_LEVELS - 1, &lnight))
         return fail("level");
-    if (rot < 0 || rot > ROTATION_AUTO) return fail("rot");
+    if (!parse_num(s_web.arg("rot"), 0, ROTATION_AUTO, &rot)) return fail("rot");
     String ntp[NTP_SERVERS];
     bool any_ntp = false;
     for (int i = 0; i < NTP_SERVERS; ++i) {
@@ -364,8 +459,10 @@ static void make_ap_identity() {
     uint8_t mac[6];
     WiFi.macAddress(mac);
     snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s%02X%02X", AP_SSID_PREFIX, mac[4], mac[5]);
-    // Fresh 8-digit WPA2 password per session, shown on the panel and in the QR.
-    snprintf(s_ap_pass, sizeof(s_ap_pass), "%08lu", (unsigned long)(esp_random() % 100000000UL));
+    // Fresh WPA2 password per session, shown on the panel and in the QR code.
+    // esp_random() is a true random source while the radio is on (it is here).
+    for (int i = 0; i < AP_PASS_LEN; ++i) s_ap_pass[i] = AP_PASS_CHARS[esp_random() % (sizeof(AP_PASS_CHARS) - 1)];
+    s_ap_pass[AP_PASS_LEN] = 0;
 }
 
 void net_start_setup() {
@@ -417,11 +514,12 @@ void net_init() {
     s_web.on("/api/scan", HTTP_GET, handle_scan);
     s_web.on("/api/settings", HTTP_POST, handle_save);
     s_web.onNotFound(handle_not_found);
+    s_web.collectHeaders(COLLECTED_HEADERS, sizeof(COLLECTED_HEADERS) / sizeof(COLLECTED_HEADERS[0]));
     s_web.begin();
 
     // Without credentials, open the setup portal only when there is no time
     // to show; with a valid RTC time the clock just runs (hold BOOT for setup).
-    if (settings_has_wifi()) begin_attempt();
+    if (settings_has_wifi()) begin_attempt(millis());
     else if (!timekeep_valid()) net_start_setup();
     else LOGI("net", "no Wi-Fi configured; running from RTC (hold BOOT 3 s for setup)");
 }
@@ -462,16 +560,8 @@ static void handle_events(uint32_t now) {
             LOGI("net", "connect failed (reason %u: %s)", reason, reason_text(reason));
         }
         s_connected = false;
-        s_attempting = false;
         s_ip[0] = 0;
-        snprintf(s_err, sizeof(s_err), "%s", reason_text(reason));
-        if (s_mode == MODE_SETUP && s_phase == SETUP_CONNECTING) {
-            s_phase = SETUP_FAIL;
-            s_phase_at = now;
-        } else {
-            s_retry_at = now + s_backoff;
-            s_backoff = min(s_backoff * 2, WIFI_RETRY_MAX_MS);
-        }
+        attempt_failed(now, reason_text(reason));
     }
 }
 
@@ -501,37 +591,29 @@ void net_loop() {
         s_connected = false;
         s_ip[0] = 0;
         s_backoff = WIFI_RETRY_MIN_MS;
-        begin_attempt();
         if (s_mode == MODE_SETUP) {
             s_phase = SETUP_CONNECTING;
             s_phase_at = now;
         }
+        begin_attempt(now);
     }
 
     if (s_attempting && now - s_attempt_at > ATTEMPT_TIMEOUT_MS) {
-        s_attempting = false;
-        snprintf(s_err, sizeof(s_err), "TIMEOUT");
         s_leaving = true;
         WiFi.disconnect(false);
         LOGI("net", "connect attempt timed out");
-        if (s_mode == MODE_SETUP && s_phase == SETUP_CONNECTING) {
-            s_phase = SETUP_FAIL;
-            s_phase_at = now;
-        } else {
-            s_retry_at = now + s_backoff;
-            s_backoff = min(s_backoff * 2, WIFI_RETRY_MAX_MS);
-        }
+        attempt_failed(now, "TIMEOUT");
     }
 
     if (s_mode == MODE_STA && !s_connected && !s_attempting && settings_has_wifi() &&
         (int32_t)(now - s_retry_at) >= 0) {
-        begin_attempt();
+        begin_attempt(now);
     }
 
     if (s_mode == MODE_SETUP) {
         s_dns.processNextRequest();
         if (s_phase == SETUP_OK && now - s_phase_at > SETUP_SUCCESS_LINGER_MS) net_stop_setup();
-        else if (s_phase != SETUP_CONNECTING && settings_has_wifi() && now - s_last_web > SETUP_IDLE_EXIT_MS)
+        else if (s_phase == SETUP_WAIT && settings_has_wifi() && now - s_last_web > SETUP_IDLE_EXIT_MS)
             net_stop_setup();
     }
     s_web.handleClient();

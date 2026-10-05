@@ -93,7 +93,6 @@
 #define AP_SSID_PREFIX          "Clock-"
 #define WIFI_RETRY_MIN_MS       10000UL
 #define WIFI_RETRY_MAX_MS       (5UL * 60UL * 1000UL)
-#define SETUP_CONNECT_TIMEOUT_MS 20000UL
 #define SETUP_SUCCESS_LINGER_MS 8000UL   // keep AP up so the phone sees "OK"
 
 // ---------------------------------------------------------------- sensors
