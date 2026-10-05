@@ -105,7 +105,7 @@ mkdir -p backup
 .venv/bin/python tools/screenshot.py shot.png
 ```
 
-指令（輸入 `help` 查看）：`status`、`shot`、`btn boot|key|pwr|touch [short|long]`、`level <1-8>`、`rot auto|0|1|2|3`、`page clock|status|setup`、`settime <unix-epoch>`、`ntp`、`rtc`（RTC 時間，以及它跳秒時落在系統時鐘那一秒的哪裡）、`imu`、`reboot`、`factory yes`。在 macOS／Linux 上工具會自動找連接埠；要指定時加上 `--port`。
+指令（輸入 `help` 查看）：`status`、`shot`、`btn boot|key|pwr|touch [short|long]`、`level <1-8>`、`rot auto|0|1|2|3`、`page clock|status|setup`、`settime <unix-epoch>`、`ntp`、`rtc`（RTC 時間，以及它跳秒時落在系統時鐘那一秒的哪裡）、`imu`、`reboot`、`factory yes`。在 macOS／Linux 上工具會自動找連接埠；要指定時加上 `--port`。截圖資料結尾附 CRC-32，傳輸損壞時會自動重試。
 
 ## 更換字型
 

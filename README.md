@@ -105,7 +105,7 @@ Changes are accepted only from the page itself: it sends an `X-Clock` header tha
 .venv/bin/python tools/screenshot.py shot.png
 ```
 
-Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, and where its tick falls against the system clock's second), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one.
+Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, and where its tick falls against the system clock's second), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one. A screenshot ends with a CRC-32 of its pixels and is retried if the stream was damaged.
 
 ## Using another font
 
