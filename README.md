@@ -52,7 +52,7 @@ While the screen is off, the first press or tap only wakes it. Inside the screen
 
 ## Build and flash
 
-You need Python 3 (tested with 3.14) and a USB-C data cable. PlatformIO downloads the toolchain into `~/.platformio` (about 7 GB on the test machine). The first build also compiles the Arduino core and takes a few minutes; later builds take about 10 s.
+You need Python 3 (tested with 3.14) and a USB-C data cable. On the first build PlatformIO downloads the toolchain into `~/.platformio` (about 7 GB on the test machine), so that run depends on your connection. After that, on the test machine (Apple M4), a full build from a fresh clone took 34 s and a rebuild after a small change about 10 s.
 
 macOS / Linux:
 
@@ -134,7 +134,7 @@ The layout (column widths, date size, positions) is recalculated for the new fon
 | Wi-Fi retry | 10 s, doubling up to 5 min | An attempt with no answer for 30 s counts as failed |
 | Wi-Fi power save | Off on USB power, on with battery only | Keeps `clock.local` responsive |
 | Setup hotspot | `Clock-` + last 2 MAC bytes, WPA2, random 8-digit password, 192.168.4.1 | Closes 8 s after a successful connection, or after 10 min idle if Wi-Fi is already configured |
-| Memory | RAM 25.2 % (82,528 / 327,680 B), flash 25.5 % (1,672,012 / 6,553,600 B) | Build of 2026-10-05 |
+| Memory | RAM 25.2 % (82,528 / 327,680 B), flash 25.5 % (1,671,292 / 6,553,600 B) | Fresh clone without `.env`, 2026-10-05 |
 
 ## Credits
 
