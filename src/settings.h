@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 static const uint8_t ROTATION_AUTO = 4;   // 0..3 = fixed quadrant, 4 = IMU
-static const int NTP_SERVERS = 3;         // what the SNTP client supports (CONFIG_LWIP_SNTP_MAX_SERVERS)
+static const int NTP_SERVERS = 3;         // what timekeep / the NTP client keep (ntp.h)
 
 struct Settings {
     char ssid[33];

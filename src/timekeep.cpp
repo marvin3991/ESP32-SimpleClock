@@ -2,13 +2,14 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <esp_sntp.h>
 #include <math.h>
 #include <string.h>
 #include <sys/time.h>
 
 #include "config.h"
 #include "log.h"
+#include "net.h"
+#include "ntp.h"
 #include "rtc.h"
 
 // Before the first NTP sync the RTC time is trusted for this long before the
@@ -41,13 +42,19 @@ static const time_t RTC_END_EPOCH = utc_from_fields(2100, 1, 1, 0, 0, 0);
 // survives a power loss of the RTC.
 static const double RTC_PPM_PER_STEP = 4.069;
 static const int RTC_STEP_MIN = -64, RTC_STEP_MAX = 63;
-// A correction pulse moves the RTC by 1/1024 s once every 4 minutes, so between
-// two measurements the error can differ by one round of pulses (|steps| / 1024 s)
-// from the average rate; the two measurements (NTP, up to ~10 ms each, and the
-// tick read) add this much more. The Offset only changes when the rate is off by
-// more than half a step plus this uncertainty.
+// What the two measurements of a rate can be off by: one round of correction
+// pulses (1/1024 s per step, every 4 minutes, so the error swings by up to
+// |steps| / 1024 s around the average rate), the error bound of each sync
+// (ntp_error_bound_us(): half the round trip to the server and on to its
+// reference) and the tick reads (each RTC read moves 11 bytes over I2C at
+// 100 kHz, about 1 ms). The Offset only changes when the rate is off by more
+// than half a step plus that.
 static const double RTC_PULSE_S = 1.0 / 1024;
-static const double RTC_MEASURE_ERR_S = 0.020;
+static const double RTC_TICK_READ_ERR_S = 0.001;
+// A sync vouches for the system clock only this long: the ESP32's own clock
+// drifts (here 14.3 and 13.8 ms an hour between syncs, -4 ppm), and the RTC
+// is measured within seconds of a sync.
+static const uint32_t SYNC_FRESH_MS = 10000;
 // The rate is judged over at least this long and only within what the Offset
 // register can correct (beyond that the time was changed, e.g. by hand).
 static const double RTC_RATE_MIN_SPAN_S = 600;
@@ -72,24 +79,28 @@ static bool s_check_pending = false;       // measure after the NTP sync once id
 static bool s_base_ok = false;             // RTC error s_base_err measured at s_base_us
 static int64_t s_base_us = 0;
 static double s_base_err = 0;
+static double s_base_bound = 0;            // error bound of the sync behind the base, s
 static int8_t s_rtc_steps = 0;             // Offset register
 static uint32_t s_rtc_checks = 0;          // drift measurements after NTP syncs
 static double s_rtc_last_ppm = 0, s_rtc_last_span_s = 0;   // the last one with a base
 
-static volatile bool s_sync_pending = false;   // set from the lwIP task
 static TimeSource s_source = TIME_NONE;
 static time_t s_last_sync = 0;
 static uint32_t s_sync_count = 0;
+static uint32_t s_last_sync_ms = 0;        // millis() of the last sync
+static int64_t s_sync_bound_us = 0;        // its error bound (ntp_error_bound_us())
+static int64_t s_last_offset_us = 0, s_last_delay_us = 0;
+static int8_t s_last_server = -1;
+static uint32_t s_clock_gen = 0;           // bumped whenever the system clock is set
+static bool s_ntp_on = false;              // the network is up: bursts are scheduled
+static bool s_ntp_busy = false;            // a burst runs in the NTP task
+static uint32_t s_ntp_due_ms = 0;          // millis() of the next burst
+static uint32_t s_ntp_retry_ms = NTP_RETRY_MIN_MS;
 static bool s_rtc_ok = false;
 static bool s_rtc_pending = false;   // the system time is to be written to the RTC
 static bool s_grace_over = false;    // FIRST_SYNC_GRACE_MS has passed (latched: millis() wraps)
-static bool s_ntp_started = false;
 static char s_tz[64] = TZ_DEFAULT;
-// lwIP's SNTP keeps pointers to these names (it does not copy them), so they
-// live here and are only rewritten while SNTP is stopped.
 static char s_servers[3][64] = {NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3};
-
-static void on_sntp_sync(struct timeval*) { s_sync_pending = true; }
 
 // Earliest plausible time: the firmware build date minus one day (the build
 // machine's time zone is unknown). Falls back to TIME_VALID_EPOCH.
@@ -115,6 +126,21 @@ static int64_t now_us() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
     return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
+}
+
+// Every change of the system clock goes through here, so that an NTP result
+// measured against the old clock is recognised as stale (s_clock_gen).
+static void set_system_us(int64_t us) {
+    struct timeval tv = {(time_t)(us / 1000000), (suseconds_t)(us % 1000000)};
+    settimeofday(&tv, nullptr);
+    ++s_clock_gen;
+}
+
+// Error bound of the system clock in s while a sync still vouches for it,
+// else a negative value (manual time, RTC time, or the sync is too old).
+static double sync_bound_s() {
+    if (s_source != TIME_NTP || millis() - s_last_sync_ms > SYNC_FRESH_MS) return -1;
+    return (double)s_sync_bound_us / 1e6;
 }
 
 // Puts the calibrated Offset back after the RTC lost power (it then resets to
@@ -161,26 +187,35 @@ static void rtc_tick_start(bool for_base) {
 }
 
 // Called with the RTC error (RTC ahead of the system clock, in s) at a tick:
-// right after an in-phase write it becomes the base; after an NTP sync it is
-// compared with the base, the Offset is corrected and the RTC set again when
-// that is due.
+// right after an in-phase write it becomes the base, provided a fresh NTP
+// sync vouches for the system clock; after an NTP sync it is compared with
+// the base, the Offset is corrected and the RTC set again when that is due.
 static void rtc_tick_measured(double err, int64_t at_us) {
+    const double bound = sync_bound_s();
     if (s_tick_for_base) {
-        s_base_ok = true;
+        s_base_ok = bound >= 0;   // a manually set clock gives no base
         s_base_us = at_us;
         s_base_err = err;
+        s_base_bound = bound;
+        return;
+    }
+    if (bound < 0) {   // the check started too long after its sync
+        LOGI("time", "RTC check skipped: the sync is too old");
         return;
     }
     ++s_rtc_checks;
-    bool rewrite = !s_base_ok || fabs(err) >= RTC_REWRITE_ERR_S;
+    // Rewrite when the RTC is surely RTC_REWRITE_ERR_S off, not just within
+    // the uncertainty of this sync.
+    bool rewrite = !s_base_ok || fabs(err) - bound >= RTC_REWRITE_ERR_S;
     if (!s_base_ok) {
-        LOGI("time", "RTC %+.1f ms (no drift base yet)", err * 1e3);
+        LOGI("time", "RTC %+.1f ms (+-%.1f, no drift base yet)", err * 1e3, bound * 1e3);
     } else {
         const double span = (double)(at_us - s_base_us) / 1e6;
         const double ppm = (err - s_base_err) / span * 1e6;   // > 0: the RTC runs fast
         s_rtc_last_ppm = ppm;
         s_rtc_last_span_s = span;
-        const double noise_ppm = (abs(s_rtc_steps) * RTC_PULSE_S + RTC_MEASURE_ERR_S) / span * 1e6;
+        const double noise_s = abs(s_rtc_steps) * RTC_PULSE_S + s_base_bound + bound + 2 * RTC_TICK_READ_ERR_S;
+        const double noise_ppm = noise_s / span * 1e6;
         const bool judged = span >= RTC_RATE_MIN_SPAN_S && fabs(ppm) <= RTC_RATE_MAX_PPM;
         int target = s_rtc_steps;
         if (judged && fabs(ppm) >= RTC_PPM_PER_STEP / 2 + noise_ppm)
@@ -189,8 +224,10 @@ static void rtc_tick_measured(double err, int64_t at_us) {
              noise_ppm, s_rtc_steps, target);
         const bool changed = target != s_rtc_steps;
         if (changed) rtc_offset_change((int8_t)target);
-        // A new rate needs a fresh start; so does a time change (implausible rate).
-        if (changed || (span >= RTC_RATE_MIN_SPAN_S && !judged)) rewrite = true;
+        // A new rate needs a fresh start; so does a time change (a rate beyond
+        // what the Offset register could cause, also allowing for the noise).
+        const bool implausible = span >= RTC_RATE_MIN_SPAN_S && fabs(ppm) - noise_ppm > RTC_RATE_MAX_PPM;
+        if (changed || implausible) rewrite = true;
     }
     if (rewrite) s_rtc_pending = true;
 }
@@ -267,8 +304,7 @@ void timekeep_init(const char* tz) {
             }
         }
         if (r == RTC_OK && utc >= min_valid_epoch()) {
-            struct timeval tv = {utc, 0};
-            settimeofday(&tv, nullptr);
+            set_system_us((int64_t)utc * 1000000);
             s_source = TIME_RTC;
             LOGI("time", "loaded from RTC (utc %ld)", (long)utc);
         } else if (r == RTC_OK) {
@@ -283,23 +319,12 @@ void timekeep_init(const char* tz) {
     if (s_source == TIME_NONE) {
         // The SoC keeps counting across software/USB resets, so time() may
         // still hold whatever a previous firmware set. Start from zero.
-        struct timeval zero = {0, 0};
-        settimeofday(&zero, nullptr);
+        set_system_us(0);
     }
-    sntp_set_time_sync_notification_cb(on_sntp_sync);
-    sntp_set_sync_interval(NTP_INTERVAL_MS);
-}
-
-static const char* server_or_null(int i) { return s_servers[i][0] ? s_servers[i] : nullptr; }
-
-static void start_sntp() {
-    configTzTime(s_tz, server_or_null(0), server_or_null(1), server_or_null(2));
-    LOGI("time", "SNTP started (%s, %s, %s)", s_servers[0], s_servers[1][0] ? s_servers[1] : "-",
-         s_servers[2][0] ? s_servers[2] : "-");
+    if (!ntp_begin()) LOGE("time", "NTP task did not start");
 }
 
 void timekeep_set_servers(const char* const servers[3]) {
-    if (s_ntp_started) esp_sntp_stop();
     int n = 0;
     for (int i = 0; i < 3; ++i) {
         if (!servers[i] || !servers[i][0]) continue;   // compact: first slot is never empty
@@ -312,19 +337,19 @@ void timekeep_set_servers(const char* const servers[3]) {
         n = 1;
     }
     for (int i = n; i < 3; ++i) s_servers[i][0] = 0;
-    if (s_ntp_started) start_sntp();
+    const char* const names[3] = {s_servers[0], s_servers[1], s_servers[2]};
+    ntp_set_servers(names);
+    s_ntp_due_ms = millis();   // try the new servers right away (once the network is up)
 }
 
 const char* timekeep_server(int i) { return (i >= 0 && i < 3) ? s_servers[i] : ""; }
 
 void timekeep_start_ntp() {
-    if (!s_ntp_started) {
-        start_sntp();
-        s_ntp_started = true;
-    } else {
-        sntp_restart();   // poll right away after a reconnect
-        LOGI("time", "SNTP restarted");
-    }
+    if (!s_ntp_on) LOGI("time", "NTP on (%s, %s, %s)", s_servers[0], s_servers[1][0] ? s_servers[1] : "-",
+                        s_servers[2][0] ? s_servers[2] : "-");
+    s_ntp_on = true;
+    s_ntp_due_ms = millis();   // after a reconnect, sync right away
+    s_ntp_retry_ms = NTP_RETRY_MIN_MS;
 }
 
 // Writes the system time to the RTC once the current second reaches the
@@ -347,6 +372,56 @@ static void rtc_write_in_phase() {
     }
 }
 
+// Sets the system clock from a finished burst and schedules the next one.
+static void ntp_apply(const NtpResult& r, uint32_t now_ms) {
+    if (r.ok && r.gen != s_clock_gen) {   // measured against a clock that was set since
+        LOGI("time", "NTP result dropped: the clock was set meanwhile");
+        s_ntp_due_ms = now_ms;
+        return;
+    }
+    const char* name = r.server >= 0 ? s_servers[r.server] : "-";
+    const int64_t target = r.ok ? now_us() + r.best.offset_us : 0;
+    const bool in_range =
+        target >= (int64_t)min_valid_epoch() * 1000000 && target < (int64_t)RTC_END_EPOCH * 1000000;
+    if (!r.ok || !in_range) {
+        if (r.ok) LOGE("time", "NTP time from %s out of range (%lld s)", name, (long long)(target / 1000000));
+        else LOGI("time", "NTP failed (%s), retry in %lu s", r.error, (unsigned long)(s_ntp_retry_ms / 1000));
+        s_ntp_due_ms = now_ms + s_ntp_retry_ms;
+        s_ntp_retry_ms = min(s_ntp_retry_ms * 2, NTP_RETRY_MAX_MS);
+        return;
+    }
+    set_system_us(target);
+    s_last_sync = (time_t)(target / 1000000);
+    ++s_sync_count;
+    s_source = TIME_NTP;
+    s_last_sync_ms = millis();
+    s_sync_bound_us = ntp_error_bound_us(r.best);
+    s_last_offset_us = r.best.offset_us;
+    s_last_delay_us = r.best.delay_us;
+    s_last_server = r.server;
+    s_check_pending = s_rtc_ok;   // measure the RTC against the fresh time, then decide
+    s_ntp_due_ms = now_ms + NTP_INTERVAL_MS;
+    s_ntp_retry_ms = NTP_RETRY_MIN_MS;
+    struct tm lt;
+    localtime_r(&s_last_sync, &lt);
+    LOGI("time", "NTP sync #%lu: %04d-%02d-%02d %02d:%02d:%02d %s (%s, offset %+.1f ms, delay %.1f ms, %u of %u)",
+         (unsigned long)s_sync_count, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min,
+         lt.tm_sec, s_tz, name, (double)r.best.offset_us / 1000, (double)r.best.delay_us / 1000, r.answers,
+         r.queries);
+}
+
+static void ntp_poll() {
+    const uint32_t now = millis();
+    NtpResult r;
+    // A result moves the system clock: never in the middle of an RTC tick measurement.
+    if (s_ntp_busy && s_tick == TICK_IDLE && ntp_take_result(&r)) {
+        s_ntp_busy = false;
+        ntp_apply(r, now);
+    }
+    if (!s_ntp_on || s_ntp_busy || (int32_t)(now - s_ntp_due_ms) < 0 || !net_connected()) return;
+    if (ntp_start_burst(s_clock_gen)) s_ntp_busy = true;
+}
+
 void timekeep_tick() {
     if (!s_grace_over && millis() > FIRST_SYNC_GRACE_MS) s_grace_over = true;
     if (s_tick != TICK_IDLE) {
@@ -356,25 +431,14 @@ void timekeep_tick() {
         rtc_tick_start(false);
     }
     rtc_write_in_phase();
-    if (!s_sync_pending) return;
-    s_sync_pending = false;
-    const time_t now = time(nullptr);
-    s_last_sync = now;
-    ++s_sync_count;
-    s_source = TIME_NTP;
-    s_check_pending = s_rtc_ok;   // measure the RTC against the fresh time, then decide
-    struct tm lt;
-    localtime_r(&now, &lt);
-    LOGI("time", "NTP sync #%lu: %04d-%02d-%02d %02d:%02d:%02d %s", (unsigned long)s_sync_count,
-         lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, s_tz);
+    ntp_poll();
 }
 
 bool timekeep_valid() { return s_source != TIME_NONE && time(nullptr) >= min_valid_epoch(); }
 
 bool timekeep_set_manual(time_t utc) {
     if (utc < min_valid_epoch() || utc >= RTC_END_EPOCH) return false;
-    struct timeval tv = {utc, 0};
-    settimeofday(&tv, nullptr);
+    set_system_us((int64_t)utc * 1000000);
     s_source = TIME_MANUAL;
     s_rtc_pending = s_rtc_ok;
     return true;
@@ -384,6 +448,12 @@ TimeSource timekeep_source() { return s_source; }
 time_t timekeep_last_sync() { return s_last_sync; }
 uint32_t timekeep_sync_count() { return s_sync_count; }
 bool timekeep_rtc_ok() { return s_rtc_ok; }
+
+void timekeep_last_ntp(double* offset_ms, double* delay_ms, const char** server) {
+    *offset_ms = (double)s_last_offset_us / 1000;
+    *delay_ms = (double)s_last_delay_us / 1000;
+    *server = s_last_server >= 0 ? s_servers[s_last_server] : "-";
+}
 
 void timekeep_rtc_drift(int8_t* steps, uint32_t* checks, float* last_ppm, float* last_hours) {
     *steps = s_rtc_steps;

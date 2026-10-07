@@ -440,9 +440,12 @@ void app_print_status() {
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &lt);
     Serial.printf("time     %s (%s, valid=%d, tz=%s)\n", buf, timekeep_source_name(), timekeep_valid(),
                   g_settings.tz);
-    Serial.printf("sync     count=%lu last=%ld stale=%d servers=%s %s %s\n", (unsigned long)timekeep_sync_count(),
-                  (long)timekeep_last_sync(), timekeep_stale(now), timekeep_server(0), timekeep_server(1),
-                  timekeep_server(2));
+    double ntp_offset_ms, ntp_delay_ms;
+    const char* ntp_from;
+    timekeep_last_ntp(&ntp_offset_ms, &ntp_delay_ms, &ntp_from);
+    Serial.printf("sync     count=%lu last=%ld stale=%d offset=%+.1fms delay=%.1fms via=%s servers=%s %s %s\n",
+                  (unsigned long)timekeep_sync_count(), (long)timekeep_last_sync(), timekeep_stale(now),
+                  ntp_offset_ms, ntp_delay_ms, ntp_from, timekeep_server(0), timekeep_server(1), timekeep_server(2));
     int8_t rtc_steps;
     uint32_t rtc_checks;
     float rtc_ppm, rtc_hours;

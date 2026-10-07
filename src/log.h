@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // Serial log. Only call from the Arduino loop task: callbacks running in
-// other tasks (SNTP, Wi-Fi events) must just set flags.
+// other tasks (NTP, Wi-Fi events) must just set flags.
 // g_log_mute is raised while a screenshot streams binary data on Serial.
 extern volatile bool g_log_mute;
 

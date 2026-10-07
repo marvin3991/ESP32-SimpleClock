@@ -27,7 +27,7 @@ static void help() {
         "  rot auto|0|1|2|3            rotation (0 = USB down, 1 left, 2 up, 3 right)\n"
         "  page clock|status|setup\n"
         "  settime <unix-epoch>        set the clock (also writes the RTC)\n"
-        "  ntp                         re-run SNTP now\n"
+        "  ntp                         sync with NTP now\n"
         "  rtc                         read the RTC; its next tick vs. the system clock\n"
         "  imu                         accelerometer + quadrant\n"
         "  reboot\n"

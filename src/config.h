@@ -85,6 +85,9 @@
 #define NTP_SERVER_2            "time.stdtime.gov.tw"
 #define NTP_SERVER_3            "pool.ntp.org"
 #define NTP_INTERVAL_MS         (60UL * 60UL * 1000UL)  // re-sync hourly
+// After a failed sync: retry after NTP_RETRY_MIN_MS, doubling up to the max.
+#define NTP_RETRY_MIN_MS        30000UL
+#define NTP_RETRY_MAX_MS        (10UL * 60UL * 1000UL)
 #define SYNC_STALE_S            (24L * 60L * 60L)       // "SYNC" warning after 24 h
 #define TIME_VALID_EPOCH        1735689600L             // 2025-01-01T00:00:00Z
 
