@@ -10,7 +10,7 @@ below keep their own licenses.
 | Component | Files | Author / copyright | License |
 |---|---|---|---|
 | **M PLUS Rounded 1c**, Black weight (font name "Rounded Mplus 1c", version 1.059) | `fonts/MPLUSRounded1c-Black.ttf` (unmodified, from [google/fonts](https://github.com/google/fonts/tree/main/ofl/mplusrounded1c); upstream [coz-m/MPLUS_FONTS](https://github.com/coz-m/MPLUS_FONTS)) | Copyright 2016 The Rounded M+ Project Authors. Design: Coji Morishita, M+ Fonts Project | SIL Open Font License 1.1, full text in `fonts/OFL.txt` |
-| Glyph bitmaps rendered from the font above | `src/generated/font_data.cpp`, `src/generated/font_data.h` (made by `tools/gen_fonts.py`) | as above | SIL Open Font License 1.1 (derived from the font) |
+| Glyph bitmaps rendered from the font above | `src/generated/font_data.cpp`, `src/generated/font_data.h` (made by `tools/gen_fonts.py`) | as above | SIL Open Font License 1.1 (derived from the font), notice in the file headers |
 | **QR Code generator library** (C), v1.8.0 | `src/qrcodegen.c`, `src/qrcodegen.h` (unmodified) | Copyright © Project Nayuki, [nayuki/QR-Code-generator](https://github.com/nayuki/QR-Code-generator) | MIT, notice kept in the file headers |
 
 ## Downloaded when building (not included) / 編譯時下載（不在 repo 內）
