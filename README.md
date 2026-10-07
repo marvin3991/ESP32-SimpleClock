@@ -107,6 +107,19 @@ Changes are accepted only from the page itself: it sends an `X-Clock` header tha
 
 Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, where its tick falls against the system clock's second, and its drift correction), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one. A screenshot ends with a CRC-32 of its pixels and is retried if the stream was damaged.
 
+## Tests
+
+The NTP code and the timekeeping have tests that run on a computer, without the board. They need a C/C++ compiler and bash: macOS or Linux (on Windows, WSL); so far run with Apple clang only.
+
+```bash
+tests/run.sh
+```
+
+- `tests/ntp_proto_test.cpp`: NTP packets. Timestamps across the 2036 era change, offset and delay, the error bound, and the replies that must be refused (another request's, kiss-o'-death, an unsynchronised server, malformed or impossible times).
+- `tests/timekeep_sim.cpp`: runs `src/timekeep.cpp` through 72 simulated hours per scenario against a PCF85063 model (crystal error, Offset correction pulses, STOP and release), an ESP32 clock that drifts, and NTP replies with uneven delays. 17 scenarios: crystals from −250 to +60 ppm and one beyond the register (−300), replies held up to 300 ms (Wi-Fi power save), a crystal swinging ±3 ppm a day, a time set by hand, NTP and Wi-Fi outages, a server answering with the year 2000, an RTC that lost power. Each checks the final Offset, how often it changed and how far the RTC strayed.
+
+All of it takes a few seconds and ends with "host tests passed" (exit status 0); `-v` also prints the firmware's log. The NTP task itself (`src/ntp.cpp`: sockets, DNS, timing) runs only on the board; its measurements are under Specifications.
+
 ## Using another font
 
 The digits and text are pre-rendered from a TrueType font. To use another one:

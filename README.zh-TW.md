@@ -107,6 +107,19 @@ mkdir -p backup
 
 指令（輸入 `help` 查看）：`status`、`shot`、`btn boot|key|pwr|touch [short|long]`、`level <1-8>`、`rot auto|0|1|2|3`、`page clock|status|setup`、`settime <unix-epoch>`、`ntp`、`rtc`（RTC 時間、它跳秒時落在系統時鐘那一秒的哪裡，以及快慢補償值）、`imu`、`reboot`、`factory yes`。在 macOS／Linux 上工具會自動找連接埠；要指定時加上 `--port`。截圖資料結尾附 CRC-32，傳輸損壞時會自動重試。
 
+## 測試
+
+NTP 與計時邏輯有可以在電腦上跑的測試，不需要板子，只需要 C/C++ 編譯器與 bash：macOS 或 Linux（Windows 用 WSL）；目前只用 Apple clang 跑過。
+
+```bash
+tests/run.sh
+```
+
+- `tests/ntp_proto_test.cpp`：NTP 封包。包括跨 2036 年紀元的時間換算、偏移與延遲計算、誤差上限，以及應該拒收的回應（別的請求的回應、kiss-o'-death、伺服器本身未同步、格式錯誤或不可能的時間）。
+- `tests/timekeep_sim.cpp`：讓 `src/timekeep.cpp` 在模擬環境中每個情境跑 72 小時。模擬的對象有 PCF85063（晶振誤差、Offset 補償脈衝、STOP 與放開）、會漂移的 ESP32 時鐘，以及來回延遲不對稱的 NTP 回應。17 個情境：晶振 −250～+60 ppm 與超出暫存器範圍的 −300 ppm、回應最多延遲 300 ms（Wi-Fi 省電）、每天擺動 ±3 ppm 的晶振、手動設定時間、NTP 與 Wi-Fi 中斷、伺服器回傳 2000 年、RTC 斷電。每個情境檢查最後的 Offset、改了幾次，以及 RTC 最多偏多少。
+
+全部跑完只要幾秒，通過時最後一行是「host tests passed」（結束碼 0）；加 `-v` 會另外印出韌體的 log。NTP 背景任務本身（`src/ntp.cpp`：socket、DNS、計時）只能在板子上跑，實測數據見「規格」。
+
 ## 更換字型
 
 數字與文字是由 TrueType 字型預先轉成點陣。要換字型：
