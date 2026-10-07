@@ -32,4 +32,5 @@ below keep their own licenses.
 
 - Waveshare ESP32-C6-Touch-AMOLED-2.16 [documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16), schematic and [example code](https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.16): pin assignments and the panel's vendor initialisation values.
 - Datasheets: CO5300 (display controller), PCF85063A (RTC), AXP2101 (PMU), QMI8658 (IMU).
+- [RFC 5905](https://www.rfc-editor.org/rfc/rfc5905) (NTPv4): packet format, offset and delay formulas, limits; `src/ntp_proto.cpp` is written from it.
 - Default time servers `tock.stdtime.gov.tw` and `time.stdtime.gov.tw` belong to Taiwan's National Time and Frequency Standards Laboratory (commissioned by BSMI, run by Chunghwa Telecom Laboratories); `pool.ntp.org` is the [NTP Pool Project](https://www.ntppool.org/).
