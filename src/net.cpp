@@ -130,7 +130,11 @@ static void begin_attempt(uint32_t now) {
     s_attempting = true;
     s_attempt_at = now;
     LOGI("net", "connecting to \"%s\"", g_settings.ssid);
-    if (WiFi.begin(g_settings.ssid, g_settings.pass) == WL_CONNECT_FAILED) {
+    // WiFi.begin() returns the status after the request (Arduino-ESP32
+    // 3.3.8), which still reads WL_CONNECT_FAILED after a failed attempt:
+    // only a change to it means that the driver refused this request.
+    const wl_status_t before = WiFi.status();
+    if (WiFi.begin(g_settings.ssid, g_settings.pass) == WL_CONNECT_FAILED && before != WL_CONNECT_FAILED) {
         LOGI("net", "connect request rejected by the Wi-Fi driver");
         attempt_failed(now, "CONNECT FAILED");
     }
