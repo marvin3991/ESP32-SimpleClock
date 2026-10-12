@@ -6,6 +6,7 @@
 
 #include "app.h"
 #include "config.h"
+#include "diag.h"
 #include "input.h"
 #include "log.h"
 #include "net.h"
@@ -28,6 +29,7 @@ static void help() {
         "  page clock|status|setup\n"
         "  settime <unix-epoch>        set the clock (also writes the RTC)\n"
         "  ntp                         sync with NTP now\n"
+        "  diag                        Wi-Fi and USB power events since start-up\n"
         "  rtc                         read the RTC; its next tick vs. the system clock\n"
         "  imu                         accelerometer + quadrant\n"
         "  reboot\n"
@@ -84,6 +86,8 @@ static void run(char* line) {
         const long long t = strtoll(argv[1], &end, 10);
         if (end == argv[1] || *end) return (void)Serial.println("ERR settime <unix-epoch>");
         Serial.println(timekeep_set_manual((time_t)t) ? "OK" : "ERR epoch outside firmware build date .. 2099");
+    } else if (!strcmp(cmd, "diag")) {
+        diag_print();
     } else if (!strcmp(cmd, "ntp")) {
         if (!net_connected()) return (void)Serial.println("ERR wifi not connected");
         timekeep_start_ntp();

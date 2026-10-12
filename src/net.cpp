@@ -8,6 +8,7 @@
 #include <esp_wifi_types.h>
 
 #include "config.h"
+#include "diag.h"
 #include "log.h"
 #include "power.h"
 #include "settings.h"
@@ -23,6 +24,7 @@ static const uint32_t ATTEMPT_TIMEOUT_MS = 30000;
 static const uint32_t SETUP_IDLE_EXIT_MS = 10UL * 60UL * 1000UL;
 static const uint32_t SCAN_MAX_AGE_MS = 20000;
 static const uint32_t POWER_CHECK_MS = 5000;
+static const uint32_t RSSI_SAMPLE_MS = 10000;   // the signal just before a drop goes into the diagnostics
 
 // Setup hotspot password: 12 characters from these 31 (no 0/o or 1/l/i, which
 // are easy to mix up when typed): 31^12, about 7.9e17 keys. Eight digits
@@ -64,6 +66,8 @@ static bool s_reconnect_pending = false;
 static uint32_t s_scan_at = 0;
 static int8_t s_sleep_mode = -1;   // last WiFi.setSleep() value, -1 = not set yet
 static uint32_t s_power_check_at = 0;
+static uint32_t s_rssi_at = 0;
+static int8_t s_rssi_last = 0;
 // These credentials connected since they were set: a handshake that fails now
 // is not taken for a wrong password.
 static bool s_creds_ok = false;
@@ -144,6 +148,7 @@ static void begin_attempt(uint32_t now) {
     const wl_status_t before = WiFi.status();
     if (WiFi.begin(g_settings.ssid, g_settings.pass) == WL_CONNECT_FAILED && before != WL_CONNECT_FAILED) {
         LOGI("net", "connect request rejected by the Wi-Fi driver");
+        diag_event(DIAG_WIFI_FAILED, DIAG_REASON_REFUSED, 0);
         attempt_failed(now, "CONNECT FAILED");
     }
 }
@@ -287,6 +292,60 @@ static void handle_state() {
     j += ",\"charging\":";
     j += power_charging() ? "true" : "false";
     j += "}}";
+    send_json(200, j);
+}
+
+// Diagnostics for the settings page (diag.h, power.h). Events oldest first:
+// [local time or "", uptime s, kind, reason, rssi, power save, USB host,
+// USB mV, VSYS mV]; the page names reasons from "reasons".
+static void handle_diag() {
+    if (!api_allowed(false)) return;
+    s_last_web = millis();
+    DiagSummary d;
+    diag_summary(&d);
+    PowerDiag p;
+    power_diag(&p);
+    String j;
+    j.reserve(2600);
+    j += "{\"up\":" + String(d.uptime_s);
+    j += ",\"reset\":";
+    json_str(j, d.reset);
+    j += ",\"loop_max\":" + String(d.loop_max_ms) + ",\"slow\":" + String(d.slow_loops);
+    j += ",\"power\":{\"vbus\":" + String(p.vbus_mv) + ",\"vbus_min\":" + String(p.vbus_min_mv) +
+         ",\"vbus_max\":" + String(p.vbus_max_mv) + ",\"vsys\":" + String(p.vsys_mv) +
+         ",\"vsys_min\":" + String(p.vsys_min_mv) + ",\"vbat\":" + String(p.vbat_mv) +
+         ",\"lost\":" + String(p.usb_lost) + ",\"back\":" + String(p.usb_back) +
+         ",\"battery_s\":" + String(p.battery_s) + ",\"limit_ma\":" + String(p.limit_ma) +
+         ",\"limit_mv\":" + String(p.limit_mv) + "}";
+    j += ",\"wifi\":{\"lost\":" + String(d.wifi_lost) + ",\"failed\":" + String(d.wifi_failed) +
+         ",\"offline_s\":" + String(d.offline_s) + ",\"longest_s\":" + String(d.longest_offline_s) +
+         ",\"now_s\":" + String(d.offline_now_s) + ",\"reasons\":[";
+    uint8_t codes[8];
+    uint16_t counts[8];
+    const int n = diag_reasons(codes, counts, 8);
+    for (int i = 0; i < n; ++i) {
+        if (i) j += ',';
+        j += "[" + String(codes[i]) + ",";
+        json_str(j, net_reason_name(codes[i]));
+        j += "," + String(counts[i]) + "]";
+    }
+    j += "]},\"events\":[";
+    for (int i = 0; i < diag_count(); ++i) {
+        const DiagEntry* e = diag_entry(i);
+        char when[16] = "";
+        if (e->utc) {
+            struct tm lt;
+            localtime_r(&e->utc, &lt);
+            strftime(when, sizeof(when), "%m-%d %H:%M:%S", &lt);
+        }
+        if (i) j += ',';
+        j += '[';
+        json_str(j, when);
+        j += "," + String(e->uptime_s) + "," + String((int)e->kind) + "," + String(e->reason) + "," +
+             String(e->rssi) + "," + String(e->power_save ? 1 : 0) + "," + String(e->usb_host ? 1 : 0) + "," +
+             String(e->vbus_mv) + "," + String(e->vsys_mv) + "]";
+    }
+    j += "]}";
     send_json(200, j);
 }
 
@@ -525,6 +584,7 @@ void net_init() {
     s_web.on("/", HTTP_GET, handle_root);
     s_web.on("/api/state", HTTP_GET, handle_state);
     s_web.on("/api/scan", HTTP_GET, handle_scan);
+    s_web.on("/api/diag", HTTP_GET, handle_diag);
     s_web.on("/api/settings", HTTP_POST, handle_save);
     s_web.onNotFound(handle_not_found);
     s_web.collectHeaders(COLLECTED_HEADERS, sizeof(COLLECTED_HEADERS) / sizeof(COLLECTED_HEADERS[0]));
@@ -547,7 +607,10 @@ static void handle_events(uint32_t now) {
         s_err[0] = 0;
         snprintf(s_ip, sizeof(s_ip), "%s", WiFi.localIP().toString().c_str());
         s_creds_ok = true;
-        LOGI("net", "connected, IP %s, RSSI %d dBm", s_ip, WiFi.RSSI());
+        s_rssi_last = (int8_t)WiFi.RSSI();
+        s_rssi_at = now;
+        LOGI("net", "connected, IP %s, RSSI %d dBm", s_ip, s_rssi_last);
+        diag_event(DIAG_WIFI_UP, 0, s_rssi_last);
         timekeep_start_ntp();
         if (!s_mdns) {
             s_mdns = MDNS.begin(HOSTNAME);
@@ -569,9 +632,11 @@ static void handle_events(uint32_t now) {
         }
         if (s_connected) {
             ++s_disconnects;
-            LOGI("net", "disconnected (reason %u)", reason);
+            LOGI("net", "disconnected (reason %u %s, last RSSI %d dBm)", reason, net_reason_name(reason), s_rssi_last);
+            diag_event(DIAG_WIFI_LOST, reason, s_rssi_last);
         } else {
-            LOGI("net", "connect failed (reason %u: %s)", reason, reason_text(reason));
+            LOGI("net", "connect failed (reason %u %s: %s)", reason, net_reason_name(reason), reason_text(reason));
+            diag_event(DIAG_WIFI_FAILED, reason, 0);
         }
         s_connected = false;
         s_ip[0] = 0;
@@ -597,6 +662,10 @@ void net_loop() {
     const uint32_t now = millis();
     handle_events(now);
     update_power_save(now);
+    if (s_connected && now - s_rssi_at >= RSSI_SAMPLE_MS) {
+        s_rssi_at = now;
+        s_rssi_last = (int8_t)WiFi.RSSI();
+    }
 
     if (s_reconnect_pending) {
         s_reconnect_pending = false;
@@ -616,6 +685,7 @@ void net_loop() {
         s_leaving = true;
         WiFi.disconnect(false);
         LOGI("net", "connect attempt timed out");
+        diag_event(DIAG_WIFI_FAILED, 0, 0);
         attempt_failed(now, "TIMEOUT");
     }
 
@@ -653,4 +723,12 @@ const char* net_ap_ssid() { return s_ap_ssid; }
 const char* net_ap_pass() { return s_ap_pass; }
 const char* net_ap_ip() { return s_ap_ip; }
 const char* net_last_error() { return s_err; }
+bool net_power_save() { return s_sleep_mode == 1; }
+
+const char* net_reason_name(uint8_t code) {
+    if (code == 0) return "TIMEOUT";   // diag.h: no code from the driver
+    if (code == DIAG_REASON_OTHER) return "OTHER";
+    if (code == DIAG_REASON_REFUSED) return "REFUSED";
+    return WiFi.STA.disconnectReasonName((wifi_err_reason_t)code);
+}
 uint32_t net_disconnects() { return s_disconnects; }

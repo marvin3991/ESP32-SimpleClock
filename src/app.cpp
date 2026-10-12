@@ -5,6 +5,7 @@
 #include <sys/time.h>
 
 #include "config.h"
+#include "diag.h"
 #include "display.h"
 #include "log.h"
 #include "net.h"
@@ -310,11 +311,21 @@ static void fill_status(const struct tm& lt, bool valid) {
         snprintf(l[L_SYNC], STATUS_LINE_LEN, "SYNC\tNEVER, FROM %s", timekeep_source_name());
     }
     snprintf(l[L_RTC], STATUS_LINE_LEN, "RTC\t%s", timekeep_rtc_ok() ? "OK" : "ERROR");
+    // With the USB voltage, "CHG" instead of "CHARGING": "99% CHARGING + USB"
+    // was already too wide for the value column. At 100 % it is left out.
+    PowerDiag pd;
+    power_diag(&pd);
+    char usb[16] = "";
+    if (power_vbus() && pd.vbus_mv)
+        snprintf(usb, sizeof(usb), "USB %u.%02uV", pd.vbus_mv / 1000, pd.vbus_mv % 1000 / 10);
+    else if (power_vbus())
+        snprintf(usb, sizeof(usb), "USB");
+    const int pct = power_battery_pct();
     if (power_has_battery())
-        snprintf(l[L_BATT], STATUS_LINE_LEN, "BATT\t%d%%%s%s", power_battery_pct(),
-                 power_charging() ? " CHARGING" : "", power_vbus() ? " + USB" : "");
+        snprintf(l[L_BATT], STATUS_LINE_LEN, "BATT\t%d%%%s%s%s", pct, power_charging() && pct < 100 ? " CHG" : "",
+                 usb[0] ? " " : "", usb);
     else
-        snprintf(l[L_BATT], STATUS_LINE_LEN, "BATT\tNONE, USB");
+        snprintf(l[L_BATT], STATUS_LINE_LEN, "BATT\tNONE, %s", usb[0] ? usb : "USB");
     snprintf(l[L_ROT], STATUS_LINE_LEN, "ROT\t%s%s", g_settings.rotation == ROTATION_AUTO ? "AUTO, " : "",
              QUADRANT_NAME[s_quadrant]);
     snprintf(l[L_FW], STATUS_LINE_LEN, "FW\t%s", FW_VERSION);
@@ -464,6 +475,16 @@ void app_print_status() {
                   g_settings.sleep_end % 60, s_in_sleep, g_settings.swap_hourly);
     Serial.printf("power    vbus=%d battery=%d pct=%d charging=%d pmu=%d\n", power_vbus(), power_has_battery(),
                   power_battery_pct(), power_charging(), power_ok());
+    PowerDiag pd;
+    power_diag(&pd);
+    DiagSummary dg;
+    diag_summary(&dg);
+    Serial.printf("diag     usb_mv=%u (%u..%u) vsys_min_mv=%u usb_lost=%lu battery_s=%lu wifi_lost=%lu failed=%lu "
+                  "offline_s=%lu now=%lu reset=%s loop_max_ms=%lu (\"diag\" for events)\n",
+                  pd.vbus_mv, pd.vbus_min_mv, pd.vbus_max_mv, pd.vsys_min_mv, (unsigned long)pd.usb_lost,
+                  (unsigned long)pd.battery_s, (unsigned long)dg.wifi_lost, (unsigned long)dg.wifi_failed,
+                  (unsigned long)dg.offline_s, (unsigned long)dg.offline_now_s, dg.reset,
+                  (unsigned long)dg.loop_max_ms);
     Serial.printf("system   fw=%s heap=%lu min_heap=%lu uptime=%lus\n", FW_VERSION,
                   (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(),
                   (unsigned long)(millis() / 1000));

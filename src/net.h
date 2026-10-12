@@ -17,4 +17,6 @@ const char* net_ap_ssid();
 const char* net_ap_pass();
 const char* net_ap_ip();
 const char* net_last_error();      // ASCII, "" if none
+bool net_power_save();             // Wi-Fi modem sleep is on (battery)
+const char* net_reason_name(uint8_t code);   // the driver's name of a disconnect code (diag.h)
 uint32_t net_disconnects();

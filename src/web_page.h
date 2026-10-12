@@ -33,6 +33,10 @@ button:disabled{opacity:.5}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;font-size:14px}
 .kv span:nth-child(odd){color:var(--dim)}
 small{color:var(--dim);display:block;margin-top:6px}
+.evw{overflow-x:auto;margin-top:10px}
+.ev{border-collapse:collapse;font-size:12px}
+.ev th,.ev td{padding:2px 10px 2px 0;text-align:left;white-space:nowrap}
+.ev th{color:var(--dim);font-weight:600}
 </style></head><body><main>
 <header><h1 data-i18n="title"></h1><button type="button" class="lang" id="lang"></button></header>
 <section><h2 data-i18n="status"></h2><div class="kv" id="st"></div></section>
@@ -106,6 +110,8 @@ small{color:var(--dim);display:block;margin-top:6px}
 <div id="msg"></div>
 </form>
 <section><h2 data-i18n="keys"></h2><div class="kv" id="keys"></div></section>
+<section><h2 data-i18n="diagT"></h2><div class="kv" id="dg"></div>
+<div class="evw"><table class="ev" id="dge"></table></div><small data-i18n="diagHint"></small></section>
 </main>
 <script>
 const T={
@@ -121,6 +127,12 @@ save:'儲存',saving:'儲存中…',saved:'已儲存。',savedWifi:'已儲存，
 failed:'連線失敗：{reason}，請檢查後重新儲存。',unknown:'無法確認連線結果，請看時鐘螢幕；失敗時長按 BOOT 3 秒重新設定。',lost:'連線中斷，請重新整理頁面。',
 'WRONG PASSWORD':'密碼錯誤','HANDSHAKE FAILED':'連線交握失敗','NO NETWORK':'找不到這個網路（需 2.4 GHz）','SIGNAL LOST':'訊號中斷','TIMEOUT':'連線逾時','CONNECT FAILED':'無法連線',
 e_ssid:'Wi-Fi 名稱需 1–32 個字元',e_pass:'Wi-Fi 密碼需 8–63 個字元，或 64 位十六進位金鑰（開放網路請留空）',e_host:'請用 http://clock.local 或時鐘的 IP 開啟本頁。',e_tz:'時區格式不正確',e_night:'夜間時段格式不正確',e_sleep:'關閉螢幕時段格式不正確',e_level:'亮度超出範圍',e_rot:'螢幕方向不正確',e_ntp:'對時伺服器格式不正確（只能有英數字、點、連字號，最長 63 字元）',e_nvs:'儲存失敗（快閃記憶體寫入錯誤）',
+diagT:'診斷（重新開機後清除）',diagHint:'最近 32 筆事件，最新的在最上面。USB 為 USB 輸入電壓；省電＝Wi-Fi 省電模式；主機＝USB 接在電腦上，而不是充電器。',
+d_power:'電源',d_vsys:'系統電壓最低',d_onBatt:'電池',d_usb:'USB 斷電',d_usbV:'{n} 次，用電池共 {b}',d_limit:'輸入上限',
+d_wifi:'Wi-Fi 中斷',d_wifiV:'斷線 {l} 次、連線失敗 {f} 次',d_off:'離線時間',d_offV:'累計 {a}，最長 {m}',d_offNow:'目前已離線 {n}',
+d_why:'失敗原因',d_sys:'系統',d_sysV:'已運作 {u}，上次重新開機：{r}，主迴圈最長 {l} ms',u_d:' 天',u_h:' 小時',u_m:' 分',
+sep:'，',e_when:'時間',e_what:'事件',e_why:'原因',e_rssi:'訊號',e_usb:'USB',e_ps:'省電',e_host:'主機',e_up:'開機後 {n}',yes:'是',
+k0:'Wi-Fi 連上',k1:'Wi-Fi 斷線',k2:'連線失敗',k3:'USB 斷電',k4:'USB 恢復',
 keys:'按鍵',k_key:'亮度 ＋（長按：切換螢幕方向）',k_boot:'亮度 －（長按 3 秒：Wi-Fi 設定）',k_pwr:'螢幕開／關（長按 6 秒：關機）',k_tapL:'輕觸螢幕',k_tap:'顯示／關閉狀態頁',k_offL:'定時關閉中',k_off:'按任一鍵或輕觸：亮 30 秒',langBtn:'English'},
 en:{title:'Clock settings',status:'Status',time_l:'Time',notSynced:' (not synced)',source:'Source',lastSync:'last sync',wifi_l:'Wi-Fi',notSet:'not set',offline:'offline',ip:'IP',power:'Power',charging:'charging',fw:'Firmware',
 wifi:'Wi-Fi (2.4 GHz only)',ssid:'Network name',scanning:'Scanning for networks…',scanFound:'Found {n} networks; pick one from the list.',scanNone:'No networks found; type the name.',scanFail:'Network scan failed.',open:'open',
@@ -134,6 +146,12 @@ save:'Save',saving:'Saving…',saved:'Saved.',savedWifi:'Saved; connecting to Wi
 failed:'Connection failed: {reason}. Check and save again.',unknown:'Could not confirm the result; check the clock. If it failed, hold BOOT for 3 s to set up again.',lost:'Connection lost; reload the page.',
 'WRONG PASSWORD':'wrong password','HANDSHAKE FAILED':'handshake failed','NO NETWORK':'network not found (2.4 GHz needed)','SIGNAL LOST':'signal lost','TIMEOUT':'timed out','CONNECT FAILED':'could not connect',
 e_ssid:'The Wi-Fi name must be 1–32 characters.',e_pass:'The Wi-Fi password must be 8–63 characters or a 64-digit hex key (empty for open networks).',e_host:'Open this page at http://clock.local or at the IP address of the clock.',e_tz:'Invalid time zone.',e_night:'Invalid night hours.',e_sleep:'Invalid screen-off hours.',e_level:'Brightness out of range.',e_rot:'Invalid orientation.',e_ntp:'Invalid time server (letters, digits, dots and hyphens; up to 63 characters).',e_nvs:'Saving failed (flash write error).',
+diagT:'Diagnostics (cleared on restart)',diagHint:'The last 32 events, newest first. USB is the USB input voltage; power save is Wi-Fi modem sleep; host means a computer, not a charger, is on the USB port.',
+d_power:'Supply',d_vsys:'system lowest',d_onBatt:'battery',d_usb:'USB power lost',d_usbV:'{n} times, {b} on battery',d_limit:'Input limit',
+d_wifi:'Wi-Fi drops',d_wifiV:'{l} lost, {f} failed attempts',d_off:'Offline',d_offV:'{a} in all, longest {m}',d_offNow:'offline for {n} now',
+d_why:'Reasons',d_sys:'System',d_sysV:'up {u}, last restart: {r}, longest loop {l} ms',u_d:' d',u_h:' h',u_m:' min',
+sep:', ',e_when:'Time',e_what:'Event',e_why:'Reason',e_rssi:'Signal',e_usb:'USB',e_ps:'Power save',e_host:'Host',e_up:'{n} after start',yes:'yes',
+k0:'Wi-Fi up',k1:'Wi-Fi lost',k2:'connect failed',k3:'USB power off',k4:'USB power on',
 keys:'Buttons',k_key:'Brightness + (hold: change orientation)',k_boot:'Brightness − (hold 3 s: Wi-Fi setup)',k_pwr:'Screen on/off (hold 6 s: power off)',k_tapL:'Tap the screen',k_tap:'Show or hide the status page',k_offL:'During screen-off hours',k_off:'Any button or tap: on for 30 s',langBtn:'中文'}};
 const $=id=>document.getElementById(id);
 // Sent with every API request: the clock refuses changes without it (another
@@ -153,6 +171,7 @@ $('lang').textContent=t('langBtn');$('tzc').placeholder=t('tzcPh');
 ['ntp1','ntp2','ntp3'].forEach((id,i)=>{$(id).placeholder=['tock.stdtime.gov.tw','time.stdtime.gov.tw','pool.ntp.org'][i]});
 $('keys').innerHTML=[['KEY',t('k_key')],['BOOT',t('k_boot')],['PWR',t('k_pwr')],[t('k_tapL'),t('k_tap')],[t('k_offL'),t('k_off')]].map(r=>'<span>'+esc(r[0])+'</span><span>'+esc(r[1])+'</span>').join('');
 if(last)status(last);
+showDiag();
 passHint();
 showScan();
 }
@@ -170,6 +189,27 @@ const rows=[[t('time_l'),s.time+(s.valid?'':t('notSynced'))],[t('source'),s.sour
 [t('wifi_l'),w],[t('ip'),s.wifi.ip||'-'],[t('power'),s.batt.present?s.batt.pct+'%'+(s.batt.charging?' '+t('charging'):''):'USB'],[t('fw'),s.fw]];
 $('st').innerHTML=rows.map(r=>'<span>'+esc(r[0])+'</span><span>'+esc(r[1])+'</span>').join('');
 }
+let dg=null;
+function dur(s){const d=Math.floor(s/86400),h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60;return(d?d+t('u_d')+' ':'')+(d||h?h+t('u_h')+' ':'')+m+t('u_m')}
+function volts(mv){return mv?(mv/1000).toFixed(2)+' V':'-'}
+// Diagnostics (/api/diag, see net.cpp): a summary and the events, newest first.
+function showDiag(){
+if(!dg)return;const p=dg.power,w=dg.wifi;
+const supply=p.vbus?'USB '+volts(p.vbus)+(p.vbus_min?' ('+volts(p.vbus_min)+' – '+volts(p.vbus_max)+')':''):t('d_onBatt')+' '+volts(p.vbat);
+const rows=[[t('d_power'),supply+t('sep')+t('d_vsys')+' '+volts(p.vsys_min)],[t('d_usb'),t('d_usbV',{n:p.lost,b:dur(p.battery_s)})],
+[t('d_limit'),p.limit_ma+' mA'+t('sep')+volts(p.limit_mv)],[t('d_wifi'),t('d_wifiV',{l:w.lost,f:w.failed})],
+[t('d_off'),t('d_offV',{a:dur(w.offline_s),m:dur(w.longest_s)})+(w.now_s?t('sep')+t('d_offNow',{n:dur(w.now_s)}):'')],
+[t('d_why'),w.reasons.length?w.reasons.map(r=>r[0]+' '+r[1]+' ×'+r[2]).join(', '):'-'],
+[t('d_sys'),t('d_sysV',{u:dur(dg.up),r:dg.reset,l:dg.loop_max})]];
+$('dg').innerHTML=rows.map(r=>'<span>'+esc(r[0])+'</span><span>'+esc(r[1])+'</span>').join('');
+const names={};w.reasons.forEach(r=>{names[r[0]]=r[1]});
+const head='<tr>'+['e_when','e_what','e_why','e_rssi','e_usb','e_ps','e_host'].map(k=>'<th>'+esc(t(k))+'</th>').join('')+'</tr>';
+$('dge').innerHTML=head+dg.events.slice().reverse().map(e=>{
+const fail=e[2]===1||e[2]===2;
+return'<tr>'+[e[0]||t('e_up',{n:dur(e[1])}),t('k'+e[2]),fail?e[3]+(names[e[3]]?' '+names[e[3]]:''):'',e[4]?e[4]+' dBm':'',
+volts(e[7]),e[5]?t('yes'):'',e[6]?t('yes'):''].map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>'}).join('');
+}
+async function diag(){try{const r=await fetch('/api/diag',{headers:H});if(r.ok){dg=await r.json();showDiag()}}catch(e){}}
 function fill(s){
 const c=s.cfg;cur=c;
 $('ssid').value=c.ssid;passHint();
@@ -234,6 +274,8 @@ finally{$('save').disabled=false}
 };
 applyLang();
 load().then(scan).catch(()=>{});
+diag();
 setInterval(()=>{if(!polling)load().catch(()=>{})},5000);
+setInterval(diag,30000);
 </script></body></html>
 )rawliteral";
