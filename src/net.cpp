@@ -64,25 +64,33 @@ static bool s_reconnect_pending = false;
 static uint32_t s_scan_at = 0;
 static int8_t s_sleep_mode = -1;   // last WiFi.setSleep() value, -1 = not set yet
 static uint32_t s_power_check_at = 0;
+// These credentials connected since they were set: a handshake that fails now
+// is not taken for a wrong password.
+static bool s_creds_ok = false;
 
 static DNSServer s_dns;
 static WebServer s_web(80);
 
 // ------------------------------------------------------------------ helpers
 
+// Short texts for the status page (they fit its value column) and the
+// settings page, which translates them.
 static const char* reason_text(uint8_t r) {
     switch (r) {
+        // A wrong password gives these codes, but so does a handshake whose
+        // frames got lost (2 = authentication expired, 15 / 204 = handshake
+        // timeout). Once these credentials have worked, say what happened.
         case WIFI_REASON_AUTH_FAIL:
         case WIFI_REASON_AUTH_EXPIRE:
         case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
         case WIFI_REASON_HANDSHAKE_TIMEOUT:
         case WIFI_REASON_MIC_FAILURE:
-            return "WRONG PASSWORD";
+            return s_creds_ok ? "HANDSHAKE FAILED" : "WRONG PASSWORD";
         case WIFI_REASON_NO_AP_FOUND:
         case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
         case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
         case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
-            return "NETWORK NOT FOUND";
+            return "NO NETWORK";
         case WIFI_REASON_BEACON_TIMEOUT:
             return "SIGNAL LOST";
         default:
@@ -442,6 +450,7 @@ static void handle_save() {
     const char* const servers[NTP_SERVERS] = {g_settings.ntp[0], g_settings.ntp[1], g_settings.ntp[2]};
     timekeep_set_servers(servers);
     if (wifi_changed) s_reconnect_pending = true;
+    if (!same_ssid || pass.length() > 0) s_creds_ok = false;   // new credentials have to prove themselves
     LOGI("net", "settings saved from web (wifi %s)", wifi_changed ? "changed" : "same");
     send_json(200, String("{\"ok\":true,\"wifi_changed\":") + (wifi_changed ? "true" : "false") + "}");
 }
@@ -537,6 +546,7 @@ static void handle_events(uint32_t now) {
         s_backoff = WIFI_RETRY_MIN_MS;
         s_err[0] = 0;
         snprintf(s_ip, sizeof(s_ip), "%s", WiFi.localIP().toString().c_str());
+        s_creds_ok = true;
         LOGI("net", "connected, IP %s, RSSI %d dBm", s_ip, WiFi.RSSI());
         timekeep_start_ntp();
         if (!s_mdns) {

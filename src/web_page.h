@@ -119,7 +119,7 @@ burn:'防烙印',swap:'星期與秒數每小時左右換邊',burnHint:'另外整
 rotT:'螢幕方向',rot_auto:'自動（重力感應）',rot_0:'USB 朝下',rot_1:'USB 朝左',rot_2:'USB 朝上',rot_3:'USB 朝右',
 save:'儲存',saving:'儲存中…',saved:'已儲存。',savedWifi:'已儲存，正在連線 Wi-Fi…',connected:'已連上 {ssid}，時鐘會自動對時。',openLater:'之後可用 http://clock.local 或 http://{ip} 開啟本頁。',
 failed:'連線失敗：{reason}，請檢查後重新儲存。',unknown:'無法確認連線結果，請看時鐘螢幕；失敗時長按 BOOT 3 秒重新設定。',lost:'連線中斷，請重新整理頁面。',
-'WRONG PASSWORD':'密碼錯誤','NETWORK NOT FOUND':'找不到這個網路（需 2.4 GHz）','SIGNAL LOST':'訊號中斷','TIMEOUT':'連線逾時','CONNECT FAILED':'無法連線',
+'WRONG PASSWORD':'密碼錯誤','HANDSHAKE FAILED':'連線交握失敗','NO NETWORK':'找不到這個網路（需 2.4 GHz）','SIGNAL LOST':'訊號中斷','TIMEOUT':'連線逾時','CONNECT FAILED':'無法連線',
 e_ssid:'Wi-Fi 名稱需 1–32 個字元',e_pass:'Wi-Fi 密碼需 8–63 個字元，或 64 位十六進位金鑰（開放網路請留空）',e_host:'請用 http://clock.local 或時鐘的 IP 開啟本頁。',e_tz:'時區格式不正確',e_night:'夜間時段格式不正確',e_sleep:'關閉螢幕時段格式不正確',e_level:'亮度超出範圍',e_rot:'螢幕方向不正確',e_ntp:'對時伺服器格式不正確（只能有英數字、點、連字號，最長 63 字元）',e_nvs:'儲存失敗（快閃記憶體寫入錯誤）',
 keys:'按鍵',k_key:'亮度 ＋（長按：切換螢幕方向）',k_boot:'亮度 －（長按 3 秒：Wi-Fi 設定）',k_pwr:'螢幕開／關（長按 6 秒：關機）',k_tapL:'輕觸螢幕',k_tap:'顯示／關閉狀態頁',k_offL:'定時關閉中',k_off:'按任一鍵或輕觸：亮 30 秒',langBtn:'English'},
 en:{title:'Clock settings',status:'Status',time_l:'Time',notSynced:' (not synced)',source:'Source',lastSync:'last sync',wifi_l:'Wi-Fi',notSet:'not set',offline:'offline',ip:'IP',power:'Power',charging:'charging',fw:'Firmware',
@@ -132,7 +132,7 @@ burn:'Burn-in protection',swap:'Move weekday and seconds to the other side every
 rotT:'Screen orientation',rot_auto:'Automatic (accelerometer)',rot_0:'USB port down',rot_1:'USB port left',rot_2:'USB port up',rot_3:'USB port right',
 save:'Save',saving:'Saving…',saved:'Saved.',savedWifi:'Saved; connecting to Wi-Fi…',connected:'Connected to {ssid}; the clock will set its time.',openLater:'Later, open this page at http://clock.local or http://{ip}.',
 failed:'Connection failed: {reason}. Check and save again.',unknown:'Could not confirm the result; check the clock. If it failed, hold BOOT for 3 s to set up again.',lost:'Connection lost; reload the page.',
-'WRONG PASSWORD':'wrong password','NETWORK NOT FOUND':'network not found (2.4 GHz needed)','SIGNAL LOST':'signal lost','TIMEOUT':'timed out','CONNECT FAILED':'could not connect',
+'WRONG PASSWORD':'wrong password','HANDSHAKE FAILED':'handshake failed','NO NETWORK':'network not found (2.4 GHz needed)','SIGNAL LOST':'signal lost','TIMEOUT':'timed out','CONNECT FAILED':'could not connect',
 e_ssid:'The Wi-Fi name must be 1–32 characters.',e_pass:'The Wi-Fi password must be 8–63 characters or a 64-digit hex key (empty for open networks).',e_host:'Open this page at http://clock.local or at the IP address of the clock.',e_tz:'Invalid time zone.',e_night:'Invalid night hours.',e_sleep:'Invalid screen-off hours.',e_level:'Brightness out of range.',e_rot:'Invalid orientation.',e_ntp:'Invalid time server (letters, digits, dots and hyphens; up to 63 characters).',e_nvs:'Saving failed (flash write error).',
 keys:'Buttons',k_key:'Brightness + (hold: change orientation)',k_boot:'Brightness − (hold 3 s: Wi-Fi setup)',k_pwr:'Screen on/off (hold 6 s: power off)',k_tapL:'Tap the screen',k_tap:'Show or hide the status page',k_offL:'During screen-off hours',k_off:'Any button or tap: on for 30 s',langBtn:'中文'}};
 const $=id=>document.getElementById(id);

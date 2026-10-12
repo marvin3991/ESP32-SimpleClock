@@ -294,8 +294,8 @@ static void fill_status(const struct tm& lt, bool valid) {
     }
     if (net_connected())
         snprintf(l[L_WIFI], STATUS_LINE_LEN, "WIFI\t%d dBm  %s", net_rssi(), g_settings.ssid);
-    else if (settings_has_wifi())
-        snprintf(l[L_WIFI], STATUS_LINE_LEN, "WIFI\tOFFLINE, %s", net_last_error());
+    else if (settings_has_wifi())   // the reason alone fits the value column; "OFFLINE, ..." did not
+        snprintf(l[L_WIFI], STATUS_LINE_LEN, "WIFI\t%s", net_last_error()[0] ? net_last_error() : "OFFLINE");
     else
         snprintf(l[L_WIFI], STATUS_LINE_LEN, "WIFI\tNOT SET");
     snprintf(l[L_IP], STATUS_LINE_LEN, "IP\t%s", net_connected() ? net_ip() : "-");
