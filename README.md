@@ -21,6 +21,7 @@ The screenshots are read back from a real board with `tools/screenshot.py`; the 
 - Burn-in protection: the whole face drifts 1 px every minute around a 12 × 12 loop (offsets −6…+5 px); every hour the side column swaps sides and the digits move 92 px; warm white instead of pure white; night dimming; screen-off schedule. Without a valid time ("--") the face still drifts every minute and swaps sides every hour of uptime; the Wi-Fi setup page drifts too and drops to the night brightness after 10 minutes without a press or tap.
 - Wi-Fi setup from a phone: the clock opens its own hotspot (random 12-character password) and shows a QR code to join it; the setup page opens by itself (captive portal).
 - Settings page at `http://clock.local` in Traditional Chinese or English (follows the browser language; switch at the top right). Changes are accepted only from the page itself, not from other web sites.
+- Diagnostics for Wi-Fi drops: every disconnect and failed attempt is recorded with the USB supply voltage at that moment (settings page, console).
 - Indicators: orange `SYNC` when the last NTP sync is more than 24 h old (or none succeeded in the first 5 minutes after start-up), red `BATT` when the battery is at 15 % or less without USB power.
 
 ## Hardware
@@ -105,7 +106,17 @@ Changes are accepted only from the page itself: it sends an `X-Clock` header tha
 .venv/bin/python tools/screenshot.py shot.png
 ```
 
-Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, where its tick falls against the system clock's second, and its drift correction), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one. A screenshot ends with a CRC-32 of its pixels and is retried if the stream was damaged.
+Commands (type `help`): `status`, `shot`, `btn boot|key|pwr|touch [short|long]`, `level <1-8>`, `rot auto|0|1|2|3`, `page clock|status|setup`, `settime <unix-epoch>`, `ntp`, `rtc` (RTC time, where its tick falls against the system clock's second, and its drift correction), `diag` (Wi-Fi and USB power events since start-up), `imu`, `reboot`, `factory yes`. The tools find the port by themselves on macOS and Linux; add `--port` to choose one. A screenshot ends with a CRC-32 of its pixels and is retried if the stream was damaged.
+
+## Diagnostics
+
+When the clock keeps dropping off Wi-Fi, it records why, with the state of its power supply at that moment. The record lives in RAM: a restart clears it, moving the USB cable to another port or computer does not (the battery bridges the change).
+
+- Settings page, last section: the USB input voltage (now, lowest, highest) and the lowest system rail voltage, how often USB power was lost and how long the clock ran on battery, the PMU's input limits, Wi-Fi drops and failed attempts, offline time in all and the longest stretch, the failure codes, and the last 32 events (Wi-Fi up / lost / failed, USB power off / on) with the signal, the USB voltage, Wi-Fi power save and whether a computer (not a charger) is on the USB port.
+- Console: `diag` prints the same; `status` has a one-line summary.
+- Status page: the battery line shows the USB voltage (`99% CHG USB 5.01V`); while offline, the Wi-Fi line shows the reason.
+
+The codes are the Wi-Fi driver's (ESP-IDF `wifi_err_reason_t`). On the test network (WPA2/WPA3), a wrong password gave 2 AUTH_EXPIRE and 202 AUTH_FAIL; 2, 15 and 204 are also what timeouts (lost frames) give. Once the stored password has connected, such failures read "HANDSHAKE FAILED", before that "WRONG PASSWORD". The `shot` command holds the main loop while it streams a frame (about 2 s), which shows up as the longest loop.
 
 ## Tests
 
@@ -116,6 +127,7 @@ tests/run.sh
 ```
 
 - `tests/ntp_proto_test.cpp`: NTP packets. Timestamps across the 2036 era change, offset and delay, the error bound, and the replies that must be refused (another request's, kiss-o'-death, an unsynchronised server, malformed or impossible times).
+- `tests/diag_test.cpp`: the diagnostics bookkeeping. Offline time, the event log and its wrap-around, the failure code counts, the uptime across the 49.7-day `millis()` wrap.
 - `tests/timekeep_sim.cpp`: runs `src/timekeep.cpp` through 72 simulated hours per scenario against a PCF85063 model (crystal error, Offset correction pulses, STOP and release), an ESP32 clock that drifts, and NTP replies with uneven delays. 17 scenarios: crystals from −250 to +60 ppm and one beyond the register (−300), replies held up to 300 ms (Wi-Fi power save), a crystal swinging ±3 ppm a day, a time set by hand, NTP and Wi-Fi outages, a server answering with the year 2000, an RTC that lost power. Each checks the final Offset, how often it changed and how far the RTC strayed.
 
 All of it takes a few seconds and ends with "host tests passed" (exit status 0); `-v` also prints the firmware's log. The NTP task itself (`src/ntp.cpp`: sockets, DNS, timing) runs only on the board; its measurements are under Specifications.
@@ -144,6 +156,7 @@ The layout (column widths, date size, positions) is recalculated for the new fon
 | RTC | PCF85063 kept in UTC, marker byte 0xC7 in its RAM register | Ignored when the marker is missing, the oscillator-stop flag is set, or the time is more than a day before the firmware build date |
 | RTC setting | Written with STOP held; STOP released at x.500 s | The RTC on this board ticks 0.500 s after the release (datasheet: 0.507813–0.507935 s); its tick then falls +1…+3 ms after the system clock's second (`rtc` command). With a drift correction the tick also swings by up to 1/1024 s per Offset step every 4 minutes, as the correction pulses come once a second at the start of every 4th minute (measured at −21: +17 ms before them, −2 ms after). Written again when it is surely 100 ms off (beyond the sync's error bound), its correction changed, or the measured drift is implausible (over 260 ppm beyond the noise) |
 | RTC drift | Measured at every NTP sync against the time since the RTC was last set | Offset register in fast mode (4.069 ppm per step, applied every 4 minutes); changed when the drift exceeds half a step plus the uncertainty of the two measurements (correction pulses, half of each sync's round trip, the tick reads); a manually set time gives no base; kept in NVS for an RTC power loss (`factory yes` clears it; it is measured again at the second NTP sync after the restart). This board (firmware log): −85.0 ppm over the first 16 min (7.3 s a day slow) → Offset −21; then +2.4 ppm over 1.04 h (0.2 s a day fast) |
+| Diagnostics | Last 32 Wi-Fi and USB power events and counters since start-up, in RAM | Voltages read every 1 s; the PMU latches USB power loss, so short dips count too; `diag`, settings page |
 | Brightness | 8 levels: 3, 8, 16, 30, 55, 95, 160, 255 (register 0x51) | Saved to flash 5 s after the last change |
 | Night dimming | Default 23:00–07:00 | Same start and end disables it; may cross midnight |
 | Screen-off schedule | Default on, 03:00–09:00 | Switches only at the window edges; 30 s on after a press; never during Wi-Fi setup |
