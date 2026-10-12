@@ -21,5 +21,7 @@ static inline auto min(A a, B b) -> decltype(a < b ? a : b) {
 
 struct FakeSerial {
     int printf(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+    static inline bool plugged = true;   // HWCDC::isPlugged(): a USB host is attached
+    static bool isPlugged() { return plugged; }
 };
 extern FakeSerial Serial;

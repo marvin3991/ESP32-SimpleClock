@@ -21,6 +21,10 @@ build() { "$@" || { echo "build failed: $*" >&2; exit 2; }; }
 build "$cxx" "${cxxflags[@]}" -o "$out/ntp_proto_test" "$here/ntp_proto_test.cpp" "$src/ntp_proto.cpp"
 "$out/ntp_proto_test" || failed=1
 
+# Diagnostics bookkeeping.
+build "$cxx" "${cxxflags[@]}" -o "$out/diag_test" "$here/diag_test.cpp" "$src/diag.cpp"
+"$out/diag_test" || failed=1
+
 # timekeep.cpp against simulated hardware; its clock calls go to sim_clock.c.
 build "$cc" -std=gnu11 "${cflags[@]}" -c "$here/sim_clock.c" -o "$out/sim_clock.o"
 build "$cxx" "${cxxflags[@]}" -Dgettimeofday=sim_gettimeofday -Dsettimeofday=sim_settimeofday -Dtime=sim_time \
