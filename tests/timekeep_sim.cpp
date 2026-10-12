@@ -277,7 +277,9 @@ struct Scenario {
 static int run_here(const Scenario& sc, const Net& net) {
     N = net;
     g_rng.seed(12345);
-    const int64_t start = 1791417600LL * 1000000 + 123456;   // 2026-10-08 00:00:00.123456 UTC
+    // Now, at a whole UTC day plus a fraction: the firmware refuses times
+    // before its build date (min_valid_epoch()), so a fixed date would expire.
+    const int64_t start = ((int64_t)::time(nullptr) / 86400 * 86400) * 1000000 + 123456;
     g_true_us = g_boot_true_us = start;
     g_sys_base_us = 0;   // whatever the SoC counts at boot; timekeep sets it
     g_sys_true_base_us = start;
