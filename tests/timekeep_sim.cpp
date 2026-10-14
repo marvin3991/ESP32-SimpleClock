@@ -163,6 +163,8 @@ struct Window {
 struct Net {
     double up_ms = 4, down_ms = 4, jitter_ms = 3;   // base one-way delay, plus uniform jitter per path
     double spike_p = 0, spike_ms = 0;               // chance and size of extra delay on the way back
+    double slow_burst_p = 0, slow_up_ms = 0;         // chance that a whole burst is held on the way out
+    double slow_from_h = 0;                          // ... from this hour on
     std::vector<Window> no_reply, wifi_down;
     double bad_time_h = -1;                          // the first burst after this hour answers year 2000
 } N;
@@ -201,10 +203,11 @@ static void finish_burst() {
     if (bad_time) N.bad_time_h = -1;
     NtpSample samples[4];
     int n = 0;
+    const bool slow = uniform(0, 1) < N.slow_burst_p && hours() >= N.slow_from_h;
     for (int q = 0; q < 4; ++q) {
         const int64_t tq = g_burst_start + q * 2000000LL;
         if (in(N.no_reply, (double)(tq - g_boot_true_us) / 3.6e9)) continue;
-        const int64_t up = (int64_t)((N.up_ms + uniform(0, N.jitter_ms)) * 1000);
+        const int64_t up = (int64_t)((N.up_ms + uniform(0, N.jitter_ms) + (slow ? N.slow_up_ms : 0)) * 1000);
         double down_ms = N.down_ms + uniform(0, N.jitter_ms);
         if (uniform(0, 1) < N.spike_p) down_ms += uniform(0, N.spike_ms);
         const int64_t down = (int64_t)(down_ms * 1000), hold = 100;
@@ -271,6 +274,8 @@ struct Scenario {
     int expect_final = 999;                    // 999: not checked
     int max_changes = 99;
     double max_rtc_err_ms = 1e9;               // after the first 6 hours
+    double max_sys_err_ms = 1e9;               // the system clock, after the first 6 hours
+    int min_syncs = 0;
     const char* expect_log = nullptr;
 };
 
@@ -338,7 +343,8 @@ static int run_here(const Scenario& sc, const Net& net) {
     for (const std::string& l : g_log)
         if (sc.expect_log && l.find(sc.expect_log) != std::string::npos) log_ok = true;
     const bool ok = (sc.expect_final == 999 || R.steps == sc.expect_final) && changes <= sc.max_changes &&
-                    max_rtc <= sc.max_rtc_err_ms && log_ok;
+                    max_rtc <= sc.max_rtc_err_ms && max_sys <= sc.max_sys_err_ms &&
+                    (int)timekeep_sync_count() >= sc.min_syncs && log_ok;
     printf("%s %-36s offset %+d, changes:%s | syncs %u, bursts %d (%d failed), RTC writes %d | after 6 h: "
            "RTC within %.0f ms, system within %.0f ms\n",
            ok ? "PASS" : "FAIL", sc.name, R.steps, changes ? changes_text.c_str() : " none", timekeep_sync_count(),
@@ -388,6 +394,13 @@ int main(int argc, char** argv) {
     wifi.wifi_down.push_back({20, 23});
     Net bad_time = lan;
     bad_time.bad_time_h = 30;
+    Net sometimes_slow = lan;   // 1 burst in 10 held 600 ms on the way out (seen: 678.8 ms)
+    sometimes_slow.slow_burst_p = 0.1;
+    sometimes_slow.slow_up_ms = 600;
+    Net always_slow = sometimes_slow;
+    always_slow.slow_burst_p = 1;
+    Net slow_later = always_slow;   // synced well first, so the held answers are refused for a while
+    slow_later.slow_from_h = 24;
     const int k = (int)lround(-85 / 4.069);   // the Offset for a -85 ppm crystal: -21
     int failed = 0;
     Scenario s;
@@ -440,6 +453,18 @@ int main(int argc, char** argv) {
     s = {"a server answers year 2000 once"};
     s.stored = k, s.expect_final = k, s.max_changes = 0, s.expect_log = "out of range";
     failed += run(s, bad_time);
+    // The system drifts 73 ms an hour here (-20 ppm); a held burst would add
+    // ~300 ms if it were taken.
+    s = {"1 burst in 10 held 600 ms"};
+    s.stored = k, s.expect_final = k, s.max_changes = 0, s.max_sys_err_ms = 120, s.min_syncs = 72;
+    s.expect_log = "too uncertain";
+    failed += run(s, sometimes_slow);
+    s = {"every burst held 600 ms"};   // still syncs: the clock's own bound grows past the answers'
+    s.stored = k, s.expect_final = k, s.max_changes = 0, s.min_syncs = 60;
+    failed += run(s, always_slow);
+    s = {"every burst held 600 ms from 24 h"};
+    s.stored = k, s.expect_final = k, s.max_changes = 0, s.min_syncs = 60, s.expect_log = "too uncertain";
+    failed += run(s, slow_later);
     s = {"RTC lost power, -21 stored"};
     s.rtc_valid = false, s.stored = k, s.expect_final = k, s.max_changes = 0;
     failed += run(s, lan);
