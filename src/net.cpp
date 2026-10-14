@@ -68,6 +68,16 @@ static int8_t s_sleep_mode = -1;   // last WiFi.setSleep() value, -1 = not set y
 static uint32_t s_power_check_at = 0;
 static uint32_t s_rssi_at = 0;
 static int8_t s_rssi_last = 0;
+// The USB supply and host as last seen (retry_on_usb_change()).
+static bool s_usb_seen = false, s_usb_vbus = false, s_usb_host = false;
+static uint32_t s_usb_retry_at = 0;
+// ESP-IDF calls the USB host gone after ~3 ms without a SOF frame
+// (usb_serial_jtag_connection_monitor.c, USJ_DISCONNECT_CONFIRM_PERIOD_MS),
+// which busy moments fake: a 208 ms "unplug" showed up during a Wi-Fi attempt.
+// Seen again, it is back at once; gone counts only after HOST_GONE_MS.
+static const uint32_t HOST_GONE_MS = 2000;
+static uint32_t s_host_seen_ms = 0;
+static bool s_host_ever = false;
 // These credentials connected since they were set: a handshake that fails now
 // is not taken for a wrong password.
 static bool s_creds_ok = false;
@@ -572,7 +582,10 @@ void net_stop_setup() {
 
 void net_init() {
     WiFi.persistent(false);   // credentials live in our own NVS namespace
-    WiFi.setAutoReconnect(false);   // reconnects are scheduled in net_loop()
+    // Reconnects are scheduled in net_loop(). Arduino still retries once by
+    // itself after the first disconnect since boot (STA.cpp, first_connect);
+    // a success then arrives as an ordinary GOT_IP event.
+    WiFi.setAutoReconnect(false);
     WiFi.setHostname(HOSTNAME);
     // With an IPv6 link-local address mDNS can answer AAAA queries too.
     // Without it, systems that ask for A + AAAA (curl, Python, some browsers
@@ -658,10 +671,41 @@ static void update_power_save(uint32_t now) {
     }
 }
 
+bool net_usb_host() {
+    const uint32_t now = millis();
+    if (Serial.isPlugged()) {
+        s_host_seen_ms = now;
+        s_host_ever = true;
+        return true;
+    }
+    return s_host_ever && now - s_host_seen_ms < HOST_GONE_MS;
+}
+
+// While offline, a change of the USB supply or host (the cable moved) retries
+// at once instead of after the backoff (up to WIFI_RETRY_MAX_MS): on a
+// monitor's USB port the clock stayed stuck for hours, and twice the first
+// attempt after moving the cable to a computer's port connected. At most one
+// such retry per WIFI_RETRY_MIN_MS, and the backoff stays, so a flapping
+// supply cannot turn into a stream of attempts.
+static void retry_on_usb_change(uint32_t now) {
+    const bool vbus = power_vbus(), host = net_usb_host();
+    const bool vbus_changed = s_usb_seen && vbus != s_usb_vbus, host_changed = s_usb_seen && host != s_usb_host;
+    s_usb_seen = true;
+    s_usb_vbus = vbus;
+    s_usb_host = host;
+    if (!(vbus_changed || host_changed) || s_mode != MODE_STA || s_connected || s_attempting || !settings_has_wifi() ||
+        now - s_usb_retry_at < WIFI_RETRY_MIN_MS)
+        return;
+    LOGI("net", "USB %s changed while offline: retrying now", vbus_changed ? "power" : "host");
+    s_usb_retry_at = now;
+    s_retry_at = now;
+}
+
 void net_loop() {
     const uint32_t now = millis();
     handle_events(now);
     update_power_save(now);
+    retry_on_usb_change(now);
     if (s_connected && now - s_rssi_at >= RSSI_SAMPLE_MS) {
         s_rssi_at = now;
         s_rssi_last = (int8_t)WiFi.RSSI();

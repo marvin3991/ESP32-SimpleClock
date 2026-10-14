@@ -59,7 +59,7 @@ void diag_event(DiagKind kind, uint8_t reason, int8_t rssi) {
     e.reason = reason;
     e.rssi = rssi;
     e.power_save = net_power_save();
-    e.usb_host = Serial.isPlugged();
+    e.usb_host = net_usb_host();
     e.vbus_mv = p.vbus_mv;
     e.vsys_mv = p.vsys_mv;
     s_next = (s_next + 1) % DIAG_LOG_LEN;

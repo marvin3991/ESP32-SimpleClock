@@ -41,6 +41,7 @@ int FakeSerial::printf(const char* fmt, ...) {
 }
 void power_diag(PowerDiag* out) { *out = g_power; }
 bool net_power_save() { return g_power_save; }
+bool net_usb_host() { return FakeSerial::isPlugged(); }
 const char* net_reason_name(uint8_t code) { return code == DIAG_REASON_OTHER ? "OTHER" : "NAME"; }
 bool timekeep_valid() { return false; }
 
