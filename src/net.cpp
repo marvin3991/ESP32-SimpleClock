@@ -729,6 +729,15 @@ const char* net_reason_name(uint8_t code) {
     if (code == 0) return "TIMEOUT";   // diag.h: no code from the driver
     if (code == DIAG_REASON_OTHER) return "OTHER";
     if (code == DIAG_REASON_REFUSED) return "REFUSED";
-    return WiFi.STA.disconnectReasonName((wifi_err_reason_t)code);
+    const char* name = WiFi.STA.disconnectReasonName((wifi_err_reason_t)code);
+    if (name && name[0]) return name;
+    switch (code) {   // newer codes that Arduino-ESP32's table may lack (209 came back empty)
+        case WIFI_REASON_ASSOC_COMEBACK_TIME_TOO_LONG: return "ASSOC_COMEBACK_TIME_TOO_LONG";
+        case WIFI_REASON_SA_QUERY_TIMEOUT: return "SA_QUERY_TIMEOUT";
+        case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY: return "NO_AP_FOUND_W_COMPATIBLE_SECURITY";
+        case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: return "NO_AP_FOUND_IN_AUTHMODE_THRESHOLD";
+        case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD: return "NO_AP_FOUND_IN_RSSI_THRESHOLD";
+        default: return "UNKNOWN";
+    }
 }
 uint32_t net_disconnects() { return s_disconnects; }
