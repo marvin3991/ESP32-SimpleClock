@@ -4,6 +4,7 @@
 #include <math.h>
 
 #include "board.h"
+#include "config.h"
 #include "display.h"
 #include "log.h"
 
@@ -169,10 +170,11 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t* p, size_t n) {
 void render_screenshot(DrawFn draw) {
     // Abort if the host stops reading for this long (unplugged, tool killed).
     const uint32_t STALL_TIMEOUT_MS = 2000;
-    // HWCDC marks the port disconnected after tx_timeout_ms without progress
-    // and then silently drops output (core 3.3.8 HWCDC.cpp, default 100 ms).
-    // A 460 KB transfer can hit a short host-side pause, so allow 2 s here.
-    const uint32_t TX_TIMEOUT_SHOT_MS = 2000, TX_TIMEOUT_DEFAULT_MS = 100;
+    // HWCDC write() returns after 20 timeouts in a row without progress
+    // (core 3.3.12 HWCDC.cpp), so this matches STALL_TIMEOUT_MS. The 2 ms
+    // logging timeout would give up on a 460 KB transfer at the first short
+    // pause on the host, and flush() would drop the end of the image.
+    const uint32_t TX_TIMEOUT_SHOT_MS = STALL_TIMEOUT_MS / 20;
     const uint32_t bytes = (uint32_t)LCD_WIDTH * LCD_HEIGHT * 2;
     g_log_mute = true;
     Serial.setTxTimeoutMs(TX_TIMEOUT_SHOT_MS);
@@ -206,6 +208,6 @@ void render_screenshot(DrawFn draw) {
     if (ok) Serial.printf("\nSHOT_END %08lx\n", (unsigned long)crc);
     else Serial.print("\nSHOT_ABORT\n");
     Serial.flush();
-    Serial.setTxTimeoutMs(TX_TIMEOUT_DEFAULT_MS);
+    Serial.setTxTimeoutMs(SERIAL_TX_TIMEOUT_MS);
     g_log_mute = false;
 }

@@ -39,8 +39,9 @@ static const char* reset_name(esp_reset_reason_t r) {
 
 void setup() {
     // HWCDC drops output by itself when no USB host is attached (wall
-    // charger), so logging never blocks the clock. Do not set the TX timeout
-    // to 0: in core 3.3.8 that marks the port disconnected after one write.
+    // charger). A host that is attached but not reading would block every
+    // log line for up to 2 s with the default timeout (see config.h).
+    Serial.setTxTimeoutMs(SERIAL_TX_TIMEOUT_MS);
     Serial.begin(115200);
     delay(200);
     LOGI("main", "ESP32 AMOLED Clock %s", FW_VERSION);

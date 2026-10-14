@@ -8,8 +8,8 @@
 #include "timekeep.h"
 
 // A pass of the main loop that takes longer than this is counted: a blocked
-// USB serial write (no reader on a USB host: up to 100 ms per write) shows up
-// here.
+// USB serial write (no reader on a USB host: up to 20 x SERIAL_TX_TIMEOUT_MS
+// per write) shows up here.
 static const uint32_t SLOW_LOOP_MS = 200;
 static const int REASON_SLOTS = 8;   // distinct failure codes counted, the last slot is "other"
 

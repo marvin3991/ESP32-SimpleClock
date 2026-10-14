@@ -129,6 +129,7 @@ static void run(char* line) {
         else Serial.println("ERR imu unavailable");
     } else if (!strcmp(cmd, "reboot")) {
         Serial.println("OK");
+        Serial.setTxTimeoutMs(SERIAL_FLUSH_TIMEOUT_MS);
         Serial.flush();
         delay(100);
         ESP.restart();
@@ -136,6 +137,7 @@ static void run(char* line) {
         if (argc < 2 || strcmp(argv[1], "yes")) return (void)Serial.println("ERR type: factory yes");
         settings_factory_reset();
         Serial.println("OK, rebooting");
+        Serial.setTxTimeoutMs(SERIAL_FLUSH_TIMEOUT_MS);
         Serial.flush();
         delay(100);
         ESP.restart();

@@ -79,6 +79,16 @@
 #define TOAST_MS                1500
 #define STATUS_PAGE_MS          10000
 
+// USB serial TX timeout. With a USB host attached but nothing reading the
+// port, core 3.3.12's HWCDC write() retries 20 times this long before it
+// returns (HWCDC.cpp, max_consec_timeouts): 2 ms caps a log line at 40 ms
+// instead of 2 s with the default 100 ms. Without a host (charger) output is
+// dropped at once.
+#define SERIAL_TX_TIMEOUT_MS    2
+// flush() drops what is still queued after this many ms without progress
+// (HWCDC.cpp), so a reply flushed before a reboot gets a longer timeout.
+#define SERIAL_FLUSH_TIMEOUT_MS 100
+
 // ---------------------------------------------------------------- time sync
 #define TZ_DEFAULT              "CST-8"     // Asia/Taipei, no DST
 #define NTP_SERVER_1            "tock.stdtime.gov.tw"   // TL (Taiwan) NTP

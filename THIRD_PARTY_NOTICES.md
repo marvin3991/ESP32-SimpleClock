@@ -17,9 +17,9 @@ below keep their own licenses.
 
 | Component | Version | License |
 |---|---|---|
-| [pioarduino platform-espressif32](https://github.com/pioarduino/platform-espressif32) | 55.03.38-1 | Apache-2.0 |
-| [Arduino-ESP32](https://github.com/espressif/arduino-esp32) | 3.3.8 | LGPL-2.1 |
-| [ESP-IDF](https://github.com/espressif/esp-idf) (inside Arduino-ESP32) | 5.5.4 | Apache-2.0 |
+| [pioarduino platform-espressif32](https://github.com/pioarduino/platform-espressif32) | 55.03.312-1 | Apache-2.0 |
+| [Arduino-ESP32](https://github.com/espressif/arduino-esp32) | 3.3.12 | LGPL-2.1 |
+| [ESP-IDF](https://github.com/espressif/esp-idf) (inside Arduino-ESP32) | 5.5.5 | Apache-2.0 |
 | [GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX) | 1.6.6 | BSD (Adafruit GFX license) |
 | [SensorLib](https://github.com/lewisxhe/SensorLib) | 0.2.6 | MIT |
 | [XPowersLib](https://github.com/lewisxhe/XPowersLib) | 0.2.9 | MIT |
