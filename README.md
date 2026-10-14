@@ -53,7 +53,7 @@ While the screen is off, the first press or tap only wakes it. Inside the screen
 
 ## Build and flash
 
-You need Python 3 (tested with 3.14) and a USB-C data cable. On the first build PlatformIO downloads the toolchain into `~/.platformio` (about 7 GB on the test machine), so that run depends on your connection. After that, on the test machine (Apple M4), a full build from a fresh clone took 34–39 s and a rebuild after a small change about 10 s.
+You need Python 3 (tested with 3.14) and a USB-C data cable. On the first build PlatformIO downloads the toolchain into `~/.platformio` (about 7 GB on the test machine, measured with pioarduino 55.03.38-1), so that run depends on your connection. After that, on the test machine (Apple M4), a full build from a fresh clone took 33–41 s and a rebuild after a small change about 10 s.
 
 macOS / Linux:
 
@@ -116,7 +116,7 @@ When the clock keeps dropping off Wi-Fi, it records why, with the state of its p
 - Console: `diag` prints the same; `status` has a one-line summary.
 - Status page: the battery line shows the USB voltage (`99% CHG USB 5.01V`); while offline, the Wi-Fi line shows the reason.
 
-The codes are the Wi-Fi driver's (ESP-IDF `wifi_err_reason_t`). On the test network (WPA2/WPA3), a wrong password gave 2 AUTH_EXPIRE and 202 AUTH_FAIL; 2, 15 and 204 are also what timeouts (lost frames) give. Once the stored password has connected, such failures read "HANDSHAKE FAILED", before that "WRONG PASSWORD". The `shot` command holds the main loop while it streams a frame (about 2 s), which shows up as the longest loop.
+The codes are the Wi-Fi driver's (ESP-IDF `wifi_err_reason_t`). On the test network (WPA2/WPA3), a wrong password gave 2 AUTH_EXPIRE and 202 AUTH_FAIL; 2, 15 and 204 are also what timeouts (lost frames) give. Once the stored password has connected, such failures read "HANDSHAKE FAILED", before that "WRONG PASSWORD". Arduino-ESP32 has no names for codes 208–212, so the firmware names them itself; 209 SA_QUERY_TIMEOUT means the router did not answer a protected (802.11w) check that the connection was still there. The `shot` command holds the main loop while it streams a frame (about 2 s), which shows up as the longest loop. With a computer on the USB port that does not read the serial port (no program has it open), each log line holds the loop for up to 40 ms.
 
 ## Tests
 
@@ -128,7 +128,7 @@ tests/run.sh
 
 - `tests/ntp_proto_test.cpp`: NTP packets. Timestamps across the 2036 era change, offset and delay, the error bound, and the replies that must be refused (another request's, kiss-o'-death, an unsynchronised server, malformed or impossible times).
 - `tests/diag_test.cpp`: the diagnostics bookkeeping. Offline time, the event log and its wrap-around, the failure code counts, the uptime across the 49.7-day `millis()` wrap.
-- `tests/timekeep_sim.cpp`: runs `src/timekeep.cpp` through 72 simulated hours per scenario against a PCF85063 model (crystal error, Offset correction pulses, STOP and release), an ESP32 clock that drifts, and NTP replies with uneven delays. 17 scenarios: crystals from −250 to +60 ppm and one beyond the register (−300), replies held up to 300 ms (Wi-Fi power save), a crystal swinging ±3 ppm a day, a time set by hand, NTP and Wi-Fi outages, a server answering with the year 2000, an RTC that lost power. Each checks the final Offset, how often it changed and how far the RTC strayed.
+- `tests/timekeep_sim.cpp`: runs `src/timekeep.cpp` through 72 simulated hours per scenario against a PCF85063 model (crystal error, Offset correction pulses, STOP and release), an ESP32 clock that drifts, and NTP replies with uneven delays. 20 scenarios: crystals from −250 to +60 ppm and one beyond the register (−300), replies held up to 300 ms (Wi-Fi power save), queries held 600 ms (one burst in ten, every burst, every burst after a day of normal ones), a crystal swinging ±3 ppm a day, a time set by hand, NTP and Wi-Fi outages, a server answering with the year 2000, an RTC that lost power. Each checks the final Offset, how often it changed and how far the RTC strayed; the held queries also how far the system clock strayed and how many syncs got through.
 
 All of it takes a few seconds and ends with "host tests passed" (exit status 0); `-v` also prints the firmware's log. The NTP task itself (`src/ntp.cpp`: sockets, DNS, timing) runs only on the board; its measurements are under Specifications.
 
@@ -152,7 +152,7 @@ The layout (column widths, date size, positions) is recalculated for the new fon
 | Date | Two tabular digits in 35 px cells; the widest day is 68 px of ink | "SUN" is 67 px of ink; the day is placed by its ink on the column edge, like the weekday |
 | Edge margin | ≥ 29 px left, 30 right, 40 top, 41 bottom | At the largest drift, both sides, all digits and labels |
 | Rendering | 480 × 32 px bands, only changed areas redrawn | The ESP32-C6 has no PSRAM for a full 450 KB frame |
-| Time sync | NTP every 3600 s, own client (RFC 5905): 4 queries 2 s apart to the first of up to 3 servers that answers; the answer with the shortest round trip sets the clock, offset ((t2 − t1) + (t3 − t4)) / 2 | Host names or IPv4 addresses (letters, digits, `.`, `-`, up to 63 characters); all empty restores the defaults. After a failure: again after 30 s, doubling up to 10 min. Against a Mac, 8 forced syncs: spread 3.4 ms, 3.5 ms with Wi-Fi power save (lwIP's SNTP before, 10 syncs: 45 ms and 115 ms) |
+| Time sync | NTP every 3600 s, own client (RFC 5905): 4 queries 2 s apart to the first of up to 3 servers that answers; the answer with the shortest round trip sets the clock, offset ((t2 − t1) + (t3 − t4)) / 2 | Host names or IPv4 addresses (letters, digits, `.`, `-`, up to 63 characters); all empty restores the defaults. After a failure: again after 30 s, doubling up to 10 min. An answer whose error bound (the round trip plus the server's root delay, halved) is over 50 ms is used only when the clock may by now be further off: the last sync's bound plus 20 ppm since (5× the drift measured here); the first after start-up is always used. Against a Mac, 8 forced syncs: spread 3.4 ms, 3.5 ms with Wi-Fi power save (lwIP's SNTP before, 10 syncs: 45 ms and 115 ms) |
 | RTC | PCF85063 kept in UTC, marker byte 0xC7 in its RAM register | Ignored when the marker is missing, the oscillator-stop flag is set, or the time is more than a day before the firmware build date |
 | RTC setting | Written with STOP held; STOP released at x.500 s | The RTC on this board ticks 0.500 s after the release (datasheet: 0.507813–0.507935 s); its tick then falls +1…+3 ms after the system clock's second (`rtc` command). With a drift correction the tick also swings by up to 1/1024 s per Offset step every 4 minutes, as the correction pulses come once a second at the start of every 4th minute (measured at −21: +17 ms before them, −2 ms after). Written again when it is surely 100 ms off (beyond the sync's error bound), its correction changed, or the measured drift is implausible (over 260 ppm beyond the noise) |
 | RTC drift | Measured at every NTP sync against the time since the RTC was last set | Offset register in fast mode (4.069 ppm per step, applied every 4 minutes); changed when the drift exceeds half a step plus the uncertainty of the two measurements (correction pulses, half of each sync's round trip, the tick reads); a manually set time gives no base; kept in NVS for an RTC power loss (`factory yes` clears it; it is measured again at the second NTP sync after the restart). This board (firmware log): −85.0 ppm over the first 16 min (7.3 s a day slow) → Offset −21; then +2.4 ppm over 1.04 h (0.2 s a day fast) |
@@ -161,10 +161,10 @@ The layout (column widths, date size, positions) is recalculated for the new fon
 | Night dimming | Default 23:00–07:00 | Same start and end disables it; may cross midnight |
 | Screen-off schedule | Default on, 03:00–09:00 | Switches only at the window edges; 30 s on after a press; never during Wi-Fi setup |
 | Orientation | QMI8658, > 0.5 g held for 0.7 s | Lying flat keeps the last orientation |
-| Wi-Fi retry | 10 s, doubling up to 5 min | An attempt with no answer for 30 s counts as failed |
+| Wi-Fi retry | 10 s, doubling up to 5 min | An attempt with no answer for 30 s counts as failed. While offline, a change of USB power or of the USB host (cable moved) retries at once, at most once per 10 s; the doubling stays |
 | Wi-Fi power save | Off on USB power, on with battery only | Keeps `clock.local` responsive |
 | Setup hotspot | `Clock-` + last 2 MAC bytes, WPA2, random 12-character password (31 symbols, no 0/o/1/l/i), 192.168.4.1 | Closes 8 s after a successful connection, or after 10 min without web requests if Wi-Fi is configured and nothing was tried in this session |
-| Memory | RAM 25.2 % (82,592 / 327,680 B), flash 24.4 % (1,601,768 / 6,553,600 B) | Fresh clone without `.env`, 2026-10-05 |
+| Memory | RAM 25.8 % (84,428 / 327,680 B), flash 25.1 % (1,642,536 / 6,553,600 B) | Fresh clone without `.env`, 2026-10-14 |
 
 ## Credits
 
