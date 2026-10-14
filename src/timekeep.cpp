@@ -55,6 +55,13 @@ static const double RTC_TICK_READ_ERR_S = 0.001;
 // drifts (here 14.3 and 13.8 ms an hour between syncs, -4 ppm), and the RTC
 // is measured within seconds of a sync.
 static const uint32_t SYNC_FRESH_MS = 10000;
+// An NTP answer must not make the clock worse: one with a 678.8 ms round trip
+// once left it 0.29 s off. Answers whose error bound is within
+// NTP_ACCEPT_BOUND_US are always taken; a worse one only when the clock may by
+// now be further off, counting SYSTEM_DRIFT_PPM since the last sync (5x the
+// -4 ppm measured above). As that grows, a slow network still gets through.
+static const int64_t NTP_ACCEPT_BOUND_US = 50000;
+static const double SYSTEM_DRIFT_PPM = 20;
 // The rate is judged over at least this long and only within what the Offset
 // register can correct (beyond that the time was changed, e.g. by hand).
 static const double RTC_RATE_MIN_SPAN_S = 600;
@@ -87,7 +94,10 @@ static double s_rtc_last_ppm = 0, s_rtc_last_span_s = 0;   // the last one with 
 static TimeSource s_source = TIME_NONE;
 static time_t s_last_sync = 0;
 static uint32_t s_sync_count = 0;
-static uint32_t s_last_sync_ms = 0;        // millis() of the last sync
+// Time since the last sync, kept in 64 bits: millis() wraps after 49.7 days,
+// and a clock left without a sync that long must not look freshly synced.
+static uint64_t s_sync_age_ms = 0;
+static uint32_t s_sync_age_at_ms = 0;      // millis() when s_sync_age_ms was brought up to date
 static int64_t s_sync_bound_us = 0;        // its error bound (ntp_error_bound_us())
 static int64_t s_last_offset_us = 0, s_last_delay_us = 0;
 static int8_t s_last_server = -1;
@@ -136,10 +146,26 @@ static void set_system_us(int64_t us) {
     ++s_clock_gen;
 }
 
+// Must run at least once per millis() wrap; timekeep_tick() calls it every pass.
+static uint64_t sync_age_ms() {
+    const uint32_t now = millis();
+    s_sync_age_ms += (uint32_t)(now - s_sync_age_at_ms);
+    s_sync_age_at_ms = now;
+    return s_sync_age_ms;
+}
+
+// How far off the system clock may be now (us): the last sync's bound plus the
+// drift since; unbounded without an NTP sync (RTC, manual or no time), so the
+// first answer after boot is always taken.
+static double clock_bound_us() {
+    if (s_source != TIME_NTP) return INFINITY;
+    return (double)s_sync_bound_us + (double)sync_age_ms() * 1000.0 * SYSTEM_DRIFT_PPM / 1e6;
+}
+
 // Error bound of the system clock in s while a sync still vouches for it,
 // else a negative value (manual time, RTC time, or the sync is too old).
 static double sync_bound_s() {
-    if (s_source != TIME_NTP || millis() - s_last_sync_ms > SYNC_FRESH_MS) return -1;
+    if (s_source != TIME_NTP || sync_age_ms() > SYNC_FRESH_MS) return -1;
     return (double)s_sync_bound_us / 1e6;
 }
 
@@ -390,12 +416,22 @@ static void ntp_apply(const NtpResult& r, uint32_t now_ms) {
         s_ntp_retry_ms = min(s_ntp_retry_ms * 2, NTP_RETRY_MAX_MS);
         return;
     }
+    const int64_t bound = ntp_error_bound_us(r.best);
+    if (bound > NTP_ACCEPT_BOUND_US && (double)bound > clock_bound_us()) {
+        LOGI("time", "NTP answer from %s too uncertain (+-%.1f ms, delay %.1f ms; the clock +-%.1f ms), retry in %lu s",
+             name, (double)bound / 1000, (double)r.best.delay_us / 1000, clock_bound_us() / 1000,
+             (unsigned long)(s_ntp_retry_ms / 1000));
+        s_ntp_due_ms = now_ms + s_ntp_retry_ms;
+        s_ntp_retry_ms = min(s_ntp_retry_ms * 2, NTP_RETRY_MAX_MS);
+        return;
+    }
     set_system_us(target);
     s_last_sync = (time_t)(target / 1000000);
     ++s_sync_count;
     s_source = TIME_NTP;
-    s_last_sync_ms = millis();
-    s_sync_bound_us = ntp_error_bound_us(r.best);
+    sync_age_ms();
+    s_sync_age_ms = 0;
+    s_sync_bound_us = bound;
     s_last_offset_us = r.best.offset_us;
     s_last_delay_us = r.best.delay_us;
     s_last_server = r.server;
@@ -424,6 +460,7 @@ static void ntp_poll() {
 
 void timekeep_tick() {
     if (!s_grace_over && millis() > FIRST_SYNC_GRACE_MS) s_grace_over = true;
+    sync_age_ms();
     if (s_tick != TICK_IDLE) {
         rtc_tick_step();
     } else if (s_check_pending && !s_rtc_pending) {
