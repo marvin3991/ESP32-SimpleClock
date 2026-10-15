@@ -12,7 +12,7 @@ applied when it has them. Layout numbers are computed here once and emitted as
 constants, so the preview PNG and the firmware share exactly the same geometry.
 The generator stops when the layout does not work with the font: ink too close
 to the screen edge, digits or rows overlapping, side text wider than the area
-the firmware redraws for it.
+the firmware redraws for it, a date frame too close to the hours or too tall.
 """
 import argparse
 import datetime
@@ -42,9 +42,17 @@ DATE_CAP_MIN, DATE_CAP_MAX = 20, 60   # cap heights tried for the date, px
 
 ROW_GAP = 30          # px between hour baseline and minute cap top
 COL_GAP = 12          # px between minute block and seconds column
-LABEL_LINE_GAP = 12   # px between weekday baseline and the date's cap top
+LABEL_LINE_GAP = 12   # px between the month's baseline and the day's cap top
 
 WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
+MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+# Month and day sit in a rounded frame below the weekday: its outer side on the
+# column's outer edge, both lines centred in it, and the frame centred between
+# the weekday and the SYNC/BATT indicator (in 12-hour mode: AM/PM).
+FRAME_STROKE = 2      # px, frame line
+FRAME_RADIUS = 10     # px, outer corners, rounded like the font's stroke ends
+FRAME_PAD_X = 5       # px from the stroke to the widest line's ink; more breaks COL_GAP to the hours
+FRAME_PAD_Y = 6       # px from the stroke to the month's cap top and to the day's baseline
 # Ink must stay at least this far from the screen edge at the largest pixel
 # shift (offsets -N/2..N/2-1 with N = SHIFT_GRID in src/config.h).
 MIN_EDGE_MARGIN = 12
@@ -202,7 +210,7 @@ def config_int(name):
         for line in fh:
             parts = line.split()
             if len(parts) >= 3 and parts[0] == "#define" and parts[1] == name:
-                return int(parts[2])
+                return int(parts[2], 0)   # also 0x... colours
     sys.exit("%s not found in src/config.h" % name)
 
 
@@ -212,16 +220,60 @@ def shift_range():
     return -(n // 2), n // 2 - 1
 
 
+def indicator_base(layout):
+    """Baseline of the SYNC/BATT indicator (IND_BASE in src/face.cpp)."""
+    return (layout["HOUR_BASE"] + layout["MIN_BASE"] - CAP_MAIN) // 2 + CAP_TEXT // 2
+
+
+def frame_bounds(fonts, layout):
+    """Rows the date frame is centred between: the weekday's ink bottom, and
+    the ink top of SYNC/BATT and of AM/PM."""
+    by = {f.name: f for f in fonts}
+    label, text = by["LABEL"], by["TEXT"]
+    weekday_bottom = max(layout["LABEL_BASE1"] + ink_box(label, wd)[3] for wd in WEEKDAYS)
+    sync_top = min(indicator_base(layout) + ink_box(text, t)[1] for t in ("SYNC", "BATT"))
+    ampm_top = min(layout["HOUR_BASE"] + ink_box(label, t)[1] for t in ("AM", "PM"))
+    return weekday_bottom, sync_top, ampm_top
+
+
+def frame_layout(fonts, layout):
+    """Size and position of the date frame and of its two lines (see FRAME_*)."""
+    by = {f.name: f for f in fonts}
+    label, date = by["LABEL"], by["DATE"]
+    cell_d = layout["CELL_DATE"]
+    widest = max([ink_box(label, m)[2] - ink_box(label, m)[0] for m in MONTHS] +
+                 [x1 - x0 for x0, x1 in (cells_ink(date, "%02d" % d, cell_d) for d in range(1, 32))])
+    month_dy = FRAME_STROKE + FRAME_PAD_Y + label.cap
+    day_dy = month_dy + LABEL_LINE_GAP + date.cap
+    h = day_dy + FRAME_PAD_Y + FRAME_STROKE
+    above, sync_top, ampm_top = frame_bounds(fonts, layout)
+    return {
+        "FRAME_W": widest + 2 * (FRAME_STROKE + FRAME_PAD_X),
+        "FRAME_H": h,
+        "FRAME_Y": above + (sync_top - above - h) // 2,
+        "FRAME_Y12": above + (ampm_top - above - h) // 2,
+        "FRAME_R": FRAME_RADIUS,
+        "FRAME_STROKE": FRAME_STROKE,
+        "MONTH_DY": month_dy,
+        "DAY_DY": day_dy,
+    }
+
+
+def frame_x(layout, left):
+    """Left edge of the date frame at pixel shift (0, 0)."""
+    return layout["ALT_COL_X"] if left else layout["RIGHT_X"] + layout["RIGHT_W"] - layout["FRAME_W"]
+
+
 def face_boxes(fonts, layout, left):
     """Ink boxes (x0, y0, x1, y1) of everything the clock face can show at
     pixel shift (0, 0), by part: "hours", "minutes" (every digit in both
-    cells) and "side" (weekdays, AM/PM, day, seconds, SYNC/BATT), placed as
-    src/face.cpp places them."""
+    cells) and "side" (weekdays, date frame, months, days, AM/PM, seconds,
+    SYNC/BATT), placed as src/face.cpp places them."""
     by = {f.name: f for f in fonts}
     bx = layout["ALT_BLOCK_X"] if left else layout["BLOCK_X"]
     cx = layout["ALT_COL_X"] if left else layout["RIGHT_X"]
     edge = cx if left else cx + layout["RIGHT_W"]   # outer edge of the side column
-    ind_base = (layout["HOUR_BASE"] + layout["MIN_BASE"] - CAP_MAIN) // 2 + CAP_TEXT // 2   # IND_BASE
+    ind_base = indicator_base(layout)
     parts = {"hours": [], "minutes": [], "side": []}
 
     def add(part, font, text, pen_x, base):
@@ -238,14 +290,22 @@ def face_boxes(fonts, layout, left):
     cells("hours", by["MAIN"], layout["HOUR_BASE"], layout["CELL"], bx)
     cells("minutes", by["MAIN"], layout["MIN_BASE"], layout["CELL"], bx)
     cells("side", by["SEC"], layout["SEC_BASE"], layout["CELL_SEC"], cx)
-    # Every day, in its cells, with its ink on the outer edge (side_cells in face.cpp).
-    date, cell_d = by["DATE"], layout["CELL_DATE"]
-    for day in range(1, 32):
-        text = "%02d" % day
-        x0, x1 = cells_ink(date, text, cell_d)
-        pen = edge - x0 if left else edge - x1
-        for i, d in enumerate(text):
-            add("side", date, d, pen + i * cell_d + cell_offset(cell_d, date.glyphs[d]["adv"]), layout["DATE_BASE"])
+    # The date frame at both heights, with every month and day centred in it
+    # (draw_date in face.cpp).
+    label, date, cell_d = by["LABEL"], by["DATE"], layout["CELL_DATE"]
+    fx, fw = frame_x(layout, left), layout["FRAME_W"]
+    for fy in (layout["FRAME_Y"], layout["FRAME_Y12"]):
+        parts["side"].append((fx, fy, fx + fw, fy + layout["FRAME_H"]))
+        for month in MONTHS:
+            x0, _, x1, _ = ink_box(label, month)
+            add("side", label, month, fx + (fw - (x1 - x0)) // 2 - x0, fy + layout["MONTH_DY"])
+        for day in range(1, 32):
+            text = "%02d" % day
+            x0, x1 = cells_ink(date, text, cell_d)
+            pen = fx + (fw - (x1 - x0)) // 2 - x0
+            for i, d in enumerate(text):
+                add("side", date, d, pen + i * cell_d + cell_offset(cell_d, date.glyphs[d]["adv"]),
+                    fy + layout["DAY_DY"])
     # Side-column text sits with its ink on the outer edge (side_text in face.cpp).
     for font, base, texts in ((by["LABEL"], layout["LABEL_BASE1"], WEEKDAYS),
                               (by["LABEL"], layout["HOUR_BASE"], ("AM", "PM")),
@@ -289,10 +349,28 @@ def layout_problems(fonts, layout):
         if (max(b[2] for b in digits) > min(b[0] for b in parts["side"]) if not left
                 else min(b[0] for b in digits) < max(b[2] for b in parts["side"])):
             problems.append("digits overlap the side column (column %s)" % side)
+        # The date frame keeps COL_GAP from the hour digit beside it: any ones
+        # digit when the column is on the right, a tens digit 0-2 on the left.
+        main, cell = by["MAIN"], layout["CELL"]
+        fx = frame_x(layout, left)
+        if left:
+            ink = min(layout["ALT_BLOCK_X"] + cell_offset(cell, main.glyphs[d]["adv"]) + ink_box(main, d)[0]
+                      for d in "012")
+            gap = ink - (fx + layout["FRAME_W"])
+        else:
+            ink = max(layout["BLOCK_X"] + cell + cell_offset(cell, main.glyphs[d]["adv"]) + ink_box(main, d)[2]
+                      for d in "0123456789")
+            gap = fx - ink
+        if gap < COL_GAP:
+            problems.append("date frame %d px from the hour digits, less than COL_GAP (column %s)" % (gap, side))
         cx = layout["ALT_COL_X"] if left else layout["RIGHT_X"]
         if (min(b[0] for b in parts["side"]) < cx - slack or
                 max(b[2] for b in parts["side"]) > cx + layout["RIGHT_W"] + slack):
             problems.append("side-column text wider than its redraw area (SIDE_COL_SLACK in src/config.h)")
+    above, sync_top, ampm_top = frame_bounds(fonts, layout)
+    for key, below, what in (("FRAME_Y", sync_top, "SYNC/BATT"), ("FRAME_Y12", ampm_top, "AM/PM")):
+        if layout[key] < above or layout[key] + layout["FRAME_H"] > below:
+            problems.append("date frame does not fit between the weekday and %s" % what)
     return sorted(set(problems))
 
 
@@ -312,7 +390,6 @@ def compute_layout(main, sec, label, date):
     min_base = hour_base + ROW_GAP + CAP_MAIN
 
     label_base1 = top + CAP_LABEL
-    date_top = label_base1 + LABEL_LINE_GAP
     ref_x0, _, ref_x1, _ = ink_box(label, DATE_WIDTH_REF)
     # Mirrored arrangement (used every other hour): side column first.
     alt_col_x = block_x
@@ -329,7 +406,6 @@ def compute_layout(main, sec, label, date):
         "RIGHT_W": right_w,
         "SEC_BASE": min_base,
         "LABEL_BASE1": label_base1,
-        "DATE_BASE": date_top + date.cap,
         "CELL_DATE": date.glyphs["0"]["adv"],
         "DATE_REF_W": ref_x1 - ref_x0,
         "TOP": top,
@@ -414,11 +490,34 @@ def draw_text(img, font, text, x, base, color):
         pen += g["adv"]
 
 
-def preview(path, fonts, layout, alt=False, hh="10", mm="08", ss="42", wd="SUN", day="4"):
+def fill_round_rect(img, x, y, w, h, r, color):
+    """Canvas::fill_round_rect in src/render.cpp: straight edges hard, corners
+    anti-aliased by the distance to the corner circle."""
+    px = img.load()
+    r = min(r, w // 2, h // 2)
+    for yy in range(max(y, 0), min(y + h, SCREEN)):
+        cy = yy + 0.5
+        dy = y + r - cy if cy < y + r else (cy - (y + h - r) if cy > y + h - r else 0)
+        for xx in range(max(x, 0), min(x + w, SCREEN)):
+            cx = xx + 0.5
+            dx = x + r - cx if cx < x + r else (cx - (x + w - r) if cx > x + w - r else 0)
+            a = 255
+            if dx > 0 and dy > 0:
+                cover = r + 0.5 - (dx * dx + dy * dy) ** 0.5
+                if cover <= 0:
+                    continue
+                if cover < 1:
+                    a = int(cover * 255)
+            old = px[xx, yy]
+            px[xx, yy] = tuple(o + (c - o) * a // 255 for o, c in zip(old, color))
+
+
+def preview(path, fonts, layout, alt=False, hh="10", mm="08", ss="42", wd="SUN", month="JAN", day="4"):
     by = {f.name: f for f in fonts}
     img = Image.new("RGB", (SCREEN, SCREEN), (0, 0, 0))
     main, sec, label = by["MAIN"], by["SEC"], by["LABEL"]
     white, accent, grey = hex_rgb(0xF4EFE6), hex_rgb(0xFF9F0A), hex_rgb(0x8E8E93)
+    frame_color = hex_rgb(config_int("COLOR_DATE_FRAME"))
     block_x = layout["ALT_BLOCK_X"] if alt else layout["BLOCK_X"]
     col_x = layout["ALT_COL_X"] if alt else layout["RIGHT_X"]
 
@@ -429,13 +528,20 @@ def preview(path, fonts, layout, alt=False, hh="10", mm="08", ss="42", wd="SUN",
     cells(main, hh, block_x, layout["CELL"], layout["HOUR_BASE"], white)
     cells(main, mm, block_x, layout["CELL"], layout["MIN_BASE"], white)
     cells(sec, ss, col_x, layout["CELL_SEC"], layout["SEC_BASE"], accent)
-    # The weekday's and the day's ink end at the column's outer edge.
+    # The weekday's ink ends at the column's outer edge; month and day are
+    # centred in the frame below it (24-hour mode).
     edge = col_x if alt else col_x + layout["RIGHT_W"]
     wx0, _, wx1, _ = ink_box(label, wd)
     draw_text(img, label, wd, edge - wx0 if alt else edge - wx1, layout["LABEL_BASE1"], accent)
+    fx, fy, fw, fh = frame_x(layout, alt), layout["FRAME_Y"], layout["FRAME_W"], layout["FRAME_H"]
+    st, r = layout["FRAME_STROKE"], layout["FRAME_R"]
+    fill_round_rect(img, fx, fy, fw, fh, r, frame_color)
+    fill_round_rect(img, fx + st, fy + st, fw - 2 * st, fh - 2 * st, r - st, (0, 0, 0))
+    mx0, _, mx1, _ = ink_box(label, month)
+    draw_text(img, label, month, fx + (fw - (mx1 - mx0)) // 2 - mx0, fy + layout["MONTH_DY"], grey)
     cell, text = layout["CELL_DATE"], "%02d" % int(day)
     dx0, dx1 = cells_ink(by["DATE"], text, cell)
-    cells(by["DATE"], text, edge - dx0 if alt else edge - dx1, cell, layout["DATE_BASE"], grey)
+    cells(by["DATE"], text, fx + (fw - (dx1 - dx0)) // 2 - dx0, cell, fy + layout["DAY_DY"], grey)
     img.save(path)
 
 
@@ -445,6 +551,7 @@ def main():
     ap.add_argument("--preview", help="write a layout preview PNG")
     ap.add_argument("--alt", action="store_true", help="preview the mirrored (side column left) layout")
     ap.add_argument("--weekday", default="SUN", help="weekday shown in the preview")
+    ap.add_argument("--month", default="JAN", help="month shown in the preview")
     ap.add_argument("--day", default="4", help="day of month shown in the preview")
     ap.add_argument("--no-emit", action="store_true", help="skip writing C sources")
     args = ap.parse_args()
@@ -465,6 +572,7 @@ def main():
     cap_date = pick_date_cap(tab, upem, cap_units, ref_x1 - ref_x0)
     fonts.append(RasterFont("DATE", tab, upem, cap_units, cap_date, "0123456789"))
     layout = compute_layout(fonts[0], fonts[1], fonts[2], fonts[4])
+    layout.update(frame_layout(fonts, layout))
     for key, val in layout.items():
         print("%-12s %d" % (key, val))
     day_inks = [x1 - x0 for x0, x1 in (cells_ink(fonts[4], "%02d" % d, layout["CELL_DATE"]) for d in range(1, 32))]
@@ -481,7 +589,7 @@ def main():
         size = emit(fonts, layout, os.path.basename(args.ttf), font_notice(args.ttf))
         print("bitmap bytes: %d" % size)
     if args.preview:
-        preview(args.preview, fonts, layout, alt=args.alt, wd=args.weekday, day=args.day)
+        preview(args.preview, fonts, layout, alt=args.alt, wd=args.weekday, month=args.month, day=args.day)
         print("preview: %s" % args.preview)
 
 

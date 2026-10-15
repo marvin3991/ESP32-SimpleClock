@@ -66,6 +66,7 @@
 #define COLOR_OK        0x30D158
 #define COLOR_PANEL     0x2C2C2E
 #define COLOR_SEG_OFF   0x48484A
+#define COLOR_DATE_FRAME 0x48484A  // frame around month and day: a step darker than its grey text
 #define COLOR_NIGHT     0x5E5CE6   // brightness toast while the night window is active
 #define COLOR_QR_LIGHT  0xE5E5EA
 #define COLOR_QR_DARK   0x000000

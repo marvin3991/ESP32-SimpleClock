@@ -32,8 +32,11 @@ static const uint16_t C_WARN = rgb565(COLOR_WARN);
 static const uint16_t C_PANEL = rgb565(COLOR_PANEL);
 static const uint16_t C_SEG_OFF = rgb565(COLOR_SEG_OFF);
 static const uint16_t C_NIGHT = rgb565(COLOR_NIGHT);
+static const uint16_t C_DATE_FRAME = rgb565(COLOR_DATE_FRAME);
 
 static const char* const WEEKDAYS[7] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
+static const char* const MONTHS[12] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                                       "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
 
 // Vertical ink extent of each digit font (from the glyph table).
 static int s_main_top, s_main_bot, s_sec_top, s_sec_bot;
@@ -42,7 +45,7 @@ static int s_main_top, s_main_bot, s_sec_top, s_sec_bot;
 
 struct ClockModel {
     char hh[3], mm[3], ss[3];
-    char wd[4], day[3], ampm[3];
+    char wd[4], mon[4], day[3], ampm[3];
     char ind[6];
     uint16_t ind_color;
     int8_t dx, dy;
@@ -101,7 +104,7 @@ static Rect r_seconds(const ClockModel& m) {
     return Rect{(int16_t)(col_x(m.left) + m.dx), (int16_t)(LAYOUT_SEC_BASE + s_sec_top + m.dy),
                 (int16_t)(2 * LAYOUT_CELL_SEC), (int16_t)(s_sec_bot - s_sec_top)};
 }
-// Side column above the seconds: weekday, day, AM/PM.
+// Side column above the seconds: weekday, month and day in their frame, AM/PM.
 static Rect r_labels(const ClockModel& m) {
     const int x = col_x(m.left) - COL_SLACK, y = LAYOUT_TOP - 8;
     return Rect{(int16_t)(x + m.dx), (int16_t)(y + m.dy), (int16_t)(LAYOUT_RIGHT_W + 2 * COL_SLACK),
@@ -147,6 +150,7 @@ static ClockModel build_clock(const FaceState& s) {
         two_digits(m.ss, s.local.tm_sec);
         if (s.show_date) {
             strcpy(m.wd, WEEKDAYS[s.local.tm_wday % 7]);
+            strcpy(m.mon, MONTHS[s.local.tm_mon % 12]);
             two_digits(m.day, s.local.tm_mday);   // always two digits: same width every day
         }
     } else {
@@ -216,22 +220,36 @@ static void side_text(Canvas& c, const ClockModel& m, const Font& f, const char*
     c.text(f, s, m.left ? side_edge(m) - x0 : side_edge(m) - x1, base + m.dy, color);
 }
 
-// The same for text in tabular cells (Canvas::text_cells), e.g. the day: the
-// cells keep its size; its position follows the ink, so it moves by a few px
-// when the day changes.
-static void side_cells(Canvas& c, const ClockModel& m, const Font& f, const char* s, int cell, int base,
-                       uint16_t color) {
-    int x0 = 0, x1 = 0;
+// Ink x-range of text drawn in tabular cells (Canvas::text_cells), from the
+// first cell's left edge.
+static void cells_ink_x(const Font& f, const char* s, int cell, int* x0, int* x1) {
     bool any = false;
+    *x0 = *x1 = 0;
     for (int i = 0; s[i]; ++i) {
         const Glyph* g = font_glyph(f, s[i]);
         if (!g || !g->w) continue;
         const int a = i * cell + (cell - (int)g->adv) / 2 + g->x, b = a + g->w;
-        x0 = any ? min(x0, a) : a;
-        x1 = any ? max(x1, b) : b;
+        *x0 = any ? min(*x0, a) : a;
+        *x1 = any ? max(*x1, b) : b;
         any = true;
     }
-    c.text_cells(f, s, m.left ? side_edge(m) - x0 : side_edge(m) - x1, base + m.dy, cell, color);
+}
+
+// Month and day in a rounded frame whose outer side is on the column edge,
+// centred between the weekday and SYNC/BATT (AM/PM in 12-hour mode; the
+// geometry comes from tools/gen_fonts.py). Each line is centred by its ink, so
+// the day moves by a few px when it changes; its cells keep its size.
+static void draw_date(Canvas& c, const ClockModel& m) {
+    const int w = LAYOUT_FRAME_W, h = LAYOUT_FRAME_H, r = LAYOUT_FRAME_R, st = LAYOUT_FRAME_STROKE;
+    const int x = m.left ? side_edge(m) : side_edge(m) - w;
+    const int y = (m.ampm[0] ? LAYOUT_FRAME_Y12 : LAYOUT_FRAME_Y) + m.dy;
+    c.fill_round_rect(x, y, w, h, r, C_DATE_FRAME);
+    c.fill_round_rect(x + st, y + st, w - 2 * st, h - 2 * st, r - st, C_BG);
+    int x0, x1;
+    font_ink_x(FONT_LABEL, m.mon, &x0, &x1);
+    c.text(FONT_LABEL, m.mon, x + (w - (x1 - x0)) / 2 - x0, y + LAYOUT_MONTH_DY, C_DIM);
+    cells_ink_x(FONT_DATE, m.day, LAYOUT_CELL_DATE, &x0, &x1);
+    c.text_cells(FONT_DATE, m.day, x + (w - (x1 - x0)) / 2 - x0, y + LAYOUT_DAY_DY, LAYOUT_CELL_DATE, C_DIM);
 }
 
 static void draw_clock(Canvas& c) {
@@ -246,8 +264,7 @@ static void draw_clock(Canvas& c) {
         c.text_cells(FONT_SEC, m.ss, col_x(m.left) + m.dx, LAYOUT_SEC_BASE + m.dy, LAYOUT_CELL_SEC, C_ACCENT);
     if (c.touches(r_labels(m))) {
         side_text(c, m, FONT_LABEL, m.wd, LAYOUT_LABEL_BASE1, C_ACCENT);
-        // The widest day is about as wide as "SUN" (LAYOUT_DATE_REF_W, see tools/gen_fonts.py).
-        side_cells(c, m, FONT_DATE, m.day, LAYOUT_CELL_DATE, LAYOUT_DATE_BASE, C_DIM);
+        if (m.wd[0]) draw_date(c, m);   // shown with the weekday (setting "date")
         side_text(c, m, FONT_LABEL, m.ampm, LAYOUT_HOUR_BASE, C_DIM);
     }
     if (m.ind[0] && c.touches(r_indicator(m))) side_text(c, m, FONT_TEXT, m.ind, IND_BASE, m.ind_color);
@@ -410,7 +427,8 @@ void face_update(const FaceState& s, bool full) {
             if (strcmp(m.hh, s_clock.hh)) render_region(r_hours(m), draw_clock);
             if (strcmp(m.mm, s_clock.mm)) render_region(r_minutes(m), draw_clock);
             if (strcmp(m.ss, s_clock.ss)) render_region(r_seconds(m), draw_clock);
-            if (strcmp(m.wd, s_clock.wd) || strcmp(m.day, s_clock.day) || strcmp(m.ampm, s_clock.ampm))
+            if (strcmp(m.wd, s_clock.wd) || strcmp(m.mon, s_clock.mon) || strcmp(m.day, s_clock.day) ||
+                strcmp(m.ampm, s_clock.ampm))
                 render_region(r_labels(m), draw_clock);
             if (strcmp(m.ind, s_clock.ind) || m.ind_color != s_clock.ind_color)
                 render_region(r_indicator(m), draw_clock);

@@ -9,7 +9,7 @@ struct Settings {
     char pass[65];
     char tz[64];             // POSIX TZ string, e.g. "CST-8"
     bool h12;                // 12-hour display
-    bool show_date;          // weekday + day next to the hours
+    bool show_date;          // weekday, month and day next to the hours
     bool night_enabled;
     uint16_t night_start;    // minutes after midnight
     uint16_t night_end;
