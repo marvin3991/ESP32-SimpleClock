@@ -60,27 +60,28 @@ void Canvas::fill_round_rect(int x, int y, int w, int h, int r, uint16_t color) 
     int y0 = max(y, (int)a_.y), y1 = min(y + h, a_.y + a_.h);
     if (x0 >= x1 || y0 >= y1) return;
     const float rf = (float)r;
+    // Only the r x r corner squares need the distance test (soft float on this
+    // chip: 3.5 us a pixel measured); rows and columns between them are solid.
+    const int solid_x0 = x + r, solid_x1 = x + w - r;
     for (int yy = y0; yy < y1; ++yy) {
         uint16_t* p = buf_ + (yy - a_.y) * a_.w + (x0 - a_.x);
+        if (yy >= y + r && yy < y + h - r) {
+            for (int xx = x0; xx < x1; ++xx) *p++ = color;
+            continue;
+        }
         const float cy = yy + 0.5f;
-        float dy = 0;
-        if (cy < y + rf) dy = y + rf - cy;
-        else if (cy > y + h - rf) dy = cy - (y + h - rf);
+        const float dy = cy < y + rf ? y + rf - cy : cy - (y + h - rf);
         for (int xx = x0; xx < x1; ++xx, ++p) {
-            const float cx = xx + 0.5f;
-            float dx = 0;
-            if (cx < x + rf) dx = x + rf - cx;
-            else if (cx > x + w - rf) dx = cx - (x + w - rf);
-            if (dx > 0 && dy > 0) {
-                // Corner: coverage from the distance to the corner circle.
-                float cover = rf + 0.5f - sqrtf(dx * dx + dy * dy);
-                if (cover <= 0) continue;
-                if (cover < 1) {
-                    *p = blend565(*p, color, (uint8_t)(cover * 255));
-                    continue;
-                }
+            if (xx >= solid_x0 && xx < solid_x1) {
+                *p = color;
+                continue;
             }
-            *p = color;
+            // Corner: coverage from the distance to the corner circle.
+            const float cx = xx + 0.5f;
+            const float dx = cx < x + rf ? x + rf - cx : cx - (x + w - rf);
+            const float cover = rf + 0.5f - sqrtf(dx * dx + dy * dy);
+            if (cover <= 0) continue;
+            *p = cover < 1 ? blend565(*p, color, (uint8_t)(cover * 255)) : color;
         }
     }
 }
