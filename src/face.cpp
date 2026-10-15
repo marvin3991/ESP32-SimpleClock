@@ -235,19 +235,27 @@ static void cells_ink_x(const Font& f, const char* s, int cell, int* x0, int* x1
     }
 }
 
-// Month and day in a rounded frame whose outer side is on the column edge,
-// centred between the weekday and SYNC/BATT (AM/PM in 12-hour mode; the
-// geometry comes from tools/gen_fonts.py). Each line is centred by its ink, so
-// the day moves by a few px when it changes; its cells keep its size.
+// `s` centred by its ink between x and x + w.
+static void text_centred(Canvas& c, const Font& f, const char* s, int x, int w, int base, uint16_t color) {
+    int x0, x1;
+    font_ink_x(f, s, &x0, &x1);
+    c.text(f, s, x + (w - (x1 - x0)) / 2 - x0, base, color);
+}
+
+// The weekday, and below it month and day in a rounded frame whose outer side
+// is on the column edge, centred between the weekday and SYNC/BATT (AM/PM in
+// 12-hour mode; the geometry comes from tools/gen_fonts.py). All three lines
+// are centred on the frame's axis by their ink, so the day moves by a few px
+// when it changes; its cells keep its size.
 static void draw_date(Canvas& c, const ClockModel& m) {
     const int w = LAYOUT_FRAME_W, h = LAYOUT_FRAME_H, r = LAYOUT_FRAME_R, st = LAYOUT_FRAME_STROKE;
     const int x = m.left ? side_edge(m) : side_edge(m) - w;
     const int y = (m.ampm[0] ? LAYOUT_FRAME_Y12 : LAYOUT_FRAME_Y) + m.dy;
+    text_centred(c, FONT_LABEL, m.wd, x, w, LAYOUT_LABEL_BASE1 + m.dy, C_ACCENT);
     c.fill_round_rect(x, y, w, h, r, C_DATE_FRAME);
     c.fill_round_rect(x + st, y + st, w - 2 * st, h - 2 * st, r - st, C_BG);
+    text_centred(c, FONT_LABEL, m.mon, x, w, y + LAYOUT_MONTH_DY, C_DIM);
     int x0, x1;
-    font_ink_x(FONT_LABEL, m.mon, &x0, &x1);
-    c.text(FONT_LABEL, m.mon, x + (w - (x1 - x0)) / 2 - x0, y + LAYOUT_MONTH_DY, C_DIM);
     cells_ink_x(FONT_DATE, m.day, LAYOUT_CELL_DATE, &x0, &x1);
     c.text_cells(FONT_DATE, m.day, x + (w - (x1 - x0)) / 2 - x0, y + LAYOUT_DAY_DY, LAYOUT_CELL_DATE, C_DIM);
 }
@@ -263,8 +271,7 @@ static void draw_clock(Canvas& c) {
     if (c.touches(r_seconds(m)))
         c.text_cells(FONT_SEC, m.ss, col_x(m.left) + m.dx, LAYOUT_SEC_BASE + m.dy, LAYOUT_CELL_SEC, C_ACCENT);
     if (c.touches(r_labels(m))) {
-        side_text(c, m, FONT_LABEL, m.wd, LAYOUT_LABEL_BASE1, C_ACCENT);
-        if (m.wd[0]) draw_date(c, m);   // shown with the weekday (setting "date")
+        if (m.wd[0]) draw_date(c, m);   // weekday, month and day (setting "date")
         side_text(c, m, FONT_LABEL, m.ampm, LAYOUT_HOUR_BASE, C_DIM);
     }
     if (m.ind[0] && c.touches(r_indicator(m))) side_text(c, m, FONT_TEXT, m.ind, IND_BASE, m.ind_color);

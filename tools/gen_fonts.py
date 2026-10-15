@@ -48,10 +48,11 @@ WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
 MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 # Month and day sit in a rounded frame below the weekday: its outer side on the
 # column's outer edge, both lines centred in it, and the frame centred between
-# the weekday and the SYNC/BATT indicator (in 12-hour mode: AM/PM).
-FRAME_STROKE = 2      # px, frame line
+# the weekday and the SYNC/BATT indicator (in 12-hour mode: AM/PM). The weekday
+# is centred on the frame's axis too, so it lines up with the month.
+FRAME_STROKE = 4      # px, frame line
 FRAME_RADIUS = 10     # px, outer corners, rounded like the font's stroke ends
-FRAME_PAD_X = 5       # px from the stroke to the widest line's ink; more breaks COL_GAP to the hours
+FRAME_PAD_X = 3       # px from the stroke to the widest line's ink; more breaks COL_GAP to the hours
 FRAME_PAD_Y = 6       # px from the stroke to the month's cap top and to the day's baseline
 # Ink must stay at least this far from the screen edge at the largest pixel
 # shift (offsets -N/2..N/2-1 with N = SHIFT_GRID in src/config.h).
@@ -290,10 +291,13 @@ def face_boxes(fonts, layout, left):
     cells("hours", by["MAIN"], layout["HOUR_BASE"], layout["CELL"], bx)
     cells("minutes", by["MAIN"], layout["MIN_BASE"], layout["CELL"], bx)
     cells("side", by["SEC"], layout["SEC_BASE"], layout["CELL_SEC"], cx)
-    # The date frame at both heights, with every month and day centred in it
-    # (draw_date in face.cpp).
+    # The date frame at both heights, with every month and day centred in it,
+    # and every weekday centred on the same axis above it (draw_date in face.cpp).
     label, date, cell_d = by["LABEL"], by["DATE"], layout["CELL_DATE"]
     fx, fw = frame_x(layout, left), layout["FRAME_W"]
+    for wd in WEEKDAYS:
+        x0, _, x1, _ = ink_box(label, wd)
+        add("side", label, wd, fx + (fw - (x1 - x0)) // 2 - x0, layout["LABEL_BASE1"])
     for fy in (layout["FRAME_Y"], layout["FRAME_Y12"]):
         parts["side"].append((fx, fy, fx + fw, fy + layout["FRAME_H"]))
         for month in MONTHS:
@@ -307,8 +311,7 @@ def face_boxes(fonts, layout, left):
                 add("side", date, d, pen + i * cell_d + cell_offset(cell_d, date.glyphs[d]["adv"]),
                     fy + layout["DAY_DY"])
     # Side-column text sits with its ink on the outer edge (side_text in face.cpp).
-    for font, base, texts in ((by["LABEL"], layout["LABEL_BASE1"], WEEKDAYS),
-                              (by["LABEL"], layout["HOUR_BASE"], ("AM", "PM")),
+    for font, base, texts in ((by["LABEL"], layout["HOUR_BASE"], ("AM", "PM")),
                               (by["TEXT"], ind_base, ("SYNC", "BATT"))):
         for text in texts:
             x0, _, x1, _ = ink_box(font, text)
@@ -528,12 +531,11 @@ def preview(path, fonts, layout, alt=False, hh="10", mm="08", ss="42", wd="SUN",
     cells(main, hh, block_x, layout["CELL"], layout["HOUR_BASE"], white)
     cells(main, mm, block_x, layout["CELL"], layout["MIN_BASE"], white)
     cells(sec, ss, col_x, layout["CELL_SEC"], layout["SEC_BASE"], accent)
-    # The weekday's ink ends at the column's outer edge; month and day are
-    # centred in the frame below it (24-hour mode).
-    edge = col_x if alt else col_x + layout["RIGHT_W"]
-    wx0, _, wx1, _ = ink_box(label, wd)
-    draw_text(img, label, wd, edge - wx0 if alt else edge - wx1, layout["LABEL_BASE1"], accent)
+    # The weekday, and month and day in the frame below it, centred on the
+    # frame's axis (24-hour mode).
     fx, fy, fw, fh = frame_x(layout, alt), layout["FRAME_Y"], layout["FRAME_W"], layout["FRAME_H"]
+    wx0, _, wx1, _ = ink_box(label, wd)
+    draw_text(img, label, wd, fx + (fw - (wx1 - wx0)) // 2 - wx0, layout["LABEL_BASE1"], accent)
     st, r = layout["FRAME_STROKE"], layout["FRAME_R"]
     fill_round_rect(img, fx, fy, fw, fh, r, frame_color)
     fill_round_rect(img, fx + st, fy + st, fw - 2 * st, fh - 2 * st, r - st, (0, 0, 0))
