@@ -13,7 +13,7 @@ The screenshots are read back from a real board with `tools/screenshot.py`; the 
 ## Features
 
 - Hours and minutes in tabular digits, aligned column by column; seconds in small type at the minutes' lower corner.
-- Weekday and day of month at the top of the side column. The day always has two digits and one fixed size, chosen so the widest day is as wide as "SUN"; both sit with their ink on the column's outer edge. AM/PM in 12-hour mode.
+- Weekday at the top of the side column, its ink on the column's outer edge. Below it the month ("OCT") and the day in a thin rounded frame, centred between the weekday and the SYNC/BATT indicator (in 12-hour mode between the weekday and AM/PM). The day always has two digits and one fixed size, chosen so the widest day is as wide as "SUN". One setting shows or hides weekday, month and day together.
 - Time sync over NTP every hour, with up to three servers you can edit (defaults `tock.stdtime.gov.tw`, `time.stdtime.gov.tw`, `pool.ntp.org`). Each sync asks four times and keeps the answer with the shortest round trip, corrected for the network delay, so Wi-Fi power save on battery does not throw it off. The PCF85063 RTC is kept in step with NTP, and the clock starts from the RTC time after a restart, so it keeps working without Wi-Fi. The RTC's drift is measured at every sync and corrected automatically.
 - Eight brightness levels, remembered separately for day and night; automatic night dimming (default 23:00–07:00).
 - Screen-off schedule (default 03:00–09:00): the panel is off in that window; a button press or a tap shows the clock for 30 s.
@@ -141,15 +141,15 @@ The digits and text are pre-rendered from a TrueType font. To use another one:
 .venv/bin/pio run -t upload
 ```
 
-The layout (column widths, date size, positions) is recalculated for the new font. The generator stops with an error if any glyph would come closer than 12 px to the screen edge at the largest drift, or if digits, the two rows or the side-column text would overlap. Check the font's license before publishing it.
+The layout (column widths, date size, positions) is recalculated for the new font. The generator stops with an error if any glyph would come closer than 12 px to the screen edge at the largest drift, if digits, the two rows or the side-column text would overlap, or if the date frame would come closer than 12 px to the hour digits or not fit between the weekday and SYNC/BATT or AM/PM. Check the font's license before publishing it.
 
 ## Specifications
 
 | Item | Value | Notes |
 |---|---|---|
-| Font | M PLUS Rounded 1c Black | Hours/minutes 176 px cap height, seconds 44 px, weekday 25 px, date 39 px, UI text 22 px; ASCII only |
+| Font | M PLUS Rounded 1c Black | Hours/minutes 176 px cap height, seconds 44 px, weekday and month 25 px, day 39 px, UI text 22 px; ASCII only |
 | Layout | Digit columns 159 px; baselines y = 225 / 431; side column 80 px | Digits at x = 35 (column right) or x = 127 (column left) |
-| Date | Two tabular digits in 35 px cells; the widest day is 68 px of ink | "SUN" is 67 px of ink; the day is placed by its ink on the column edge, like the weekday |
+| Date | Month above two tabular digits in 35 px cells, both centred by their ink in an 87 × 92 px frame (2 px line in #48484A, corner radius 10 px) whose outer side is on the column edge | Widest month (MAY) 73 px of ink, widest day 68 px, "SUN" 67 px. Frame top y = 105, or 91 in 12-hour mode; 12 px from the hour digits |
 | Edge margin | ≥ 29 px left, 30 right, 40 top, 41 bottom | At the largest drift, both sides, all digits and labels |
 | Rendering | 480 × 32 px bands, only changed areas redrawn | The ESP32-C6 has no PSRAM for a full 450 KB frame |
 | Time sync | NTP every 3600 s, own client (RFC 5905): 4 queries 2 s apart to the first of up to 3 servers that answers; the answer with the shortest round trip sets the clock, offset ((t2 − t1) + (t3 − t4)) / 2 | Host names or IPv4 addresses (letters, digits, `.`, `-`, up to 63 characters); all empty restores the defaults. After a failure: again after 30 s, doubling up to 10 min. An answer whose error bound (the round trip plus the server's root delay, halved) is over 50 ms is used only when the clock may by now be further off: the last sync's bound plus 20 ppm since (5× the drift measured here); the first after start-up is always used. Against a Mac, 8 forced syncs: spread 3.4 ms, 3.5 ms with Wi-Fi power save (lwIP's SNTP before, 10 syncs: 45 ms and 115 ms) |
